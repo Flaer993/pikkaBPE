@@ -108,18 +108,42 @@ class Predictor:
         self.model.classifier[-1]=torch.nn.Linear(self.model.classifier[-1].in_features,len(self.classes))
         self.model.load_state_dict(checkpoint['state_dict']); self.model.to(self.device).eval()
     def predict(self,path):
-        import torch
         from PIL import Image
-        with Image.open(path) as image: tensor=transforms_for()(image.convert('RGB')).unsqueeze(0).to(self.device)
+        with Image.open(path) as image: return self.predict_image(image)
+
+    def predict_image(self,image):
+        import torch
+        tensor=transforms_for()(image.convert('RGB')).unsqueeze(0).to(self.device)
         with torch.inference_mode(): prob=self.model(tensor).softmax(1)[0]
         index=int(prob.argmax()); return self.classes[index],float(prob[index])
+
+
+def serve(model):
+    import sys, base64, io
+    from PIL import Image
+    predictor=Predictor(model)
+    print(json.dumps({'ready':True,'device':predictor.device}),flush=True)
+    for line in sys.stdin:
+        request={}
+        try:
+            request=json.loads(line)
+            with Image.open(io.BytesIO(base64.b64decode(request['image'],validate=True))) as image:
+                code,score=predictor.predict_image(image)
+            result={'id':request['id'],'barcode':code,'score':score}
+        except Exception as exc:
+            result={'id':request.get('id'),'error':str(exc)}
+        print(json.dumps(result,ensure_ascii=False),flush=True)
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--data'); parser.add_argument('--epochs',type=int,default=10)
     parser.add_argument('--predict'); parser.add_argument('--model')
+    parser.add_argument('--serve',action='store_true')
     args=parser.parse_args()
-    if args.predict:
+    if args.serve:
+        if not args.model: parser.error('--model is required')
+        serve(args.model)
+    elif args.predict:
         if not args.model: parser.error('--model is required for prediction')
         code,score=Predictor(args.model).predict(args.predict); print(f'{code}: {score:.1%}')
     elif args.data: train_model(args.data,args.epochs)

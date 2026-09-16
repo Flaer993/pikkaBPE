@@ -45,6 +45,8 @@ class Video(QLabel):
         self.roi = None
         self.start = None
         self.end = None
+        self.recognition_text=''
+        self.recognition_roi=None
         self.setStyleSheet('background:#101419;border:1px solid #39434e;color:#7f8995;')
 
     def display_rect(self):
@@ -90,6 +92,13 @@ class Video(QLabel):
             painter.drawRect(QRect(view.x()+round(x*view.width()), view.y()+round(y*view.height()), round(w*view.width()), round(h*view.height())))
         if self.start is not None and self.end is not None:
             painter.drawRect(QRect(self.start, self.end).normalized())
+        if self.recognition_text:
+            if self.recognition_roi and self.recognition_roi!=(0,0,1,1):
+                x,y,w,h=self.recognition_roi
+                painter.setPen(QPen(Qt.green,2)); painter.drawRect(QRect(view.x()+round(x*view.width()),view.y()+round(y*view.height()),round(w*view.width()),round(h*view.height())))
+            text_rect=QRect(view.x()+8,view.y()+8,max(1,view.width()-16),64)
+            painter.fillRect(text_rect,Qt.black); painter.setPen(Qt.white)
+            painter.drawText(text_rect.adjusted(8,4,-8,-4),Qt.AlignLeft|Qt.AlignVCenter|Qt.TextWordWrap,self.recognition_text)
 
 
 class Capture(QThread):
@@ -151,6 +160,12 @@ class Window(QMainWindow):
         self.last_candidate = 0
         self.last_follow = 0
         self.predictor = None
+        from .recognition import Recognition
+        self.recognition=Recognition(self)
+        self.recognition.result.connect(self.recognition_result)
+        self.recognition.message.connect(self.recognition_message)
+        self.recognition_generation=0; self.manual_request=None; self.last_inferred_frame=-1
+        self.last_inference=0; self.result_until=0; self.inference_roi=None
         self.setWindowTitle(f'pikkāBPE / операторская станция {__version__}')
         self.logo_path=Path(__file__).parent/'assets'/'logo.svg'
         self.setWindowIcon(QIcon(str(self.logo_path)))
@@ -165,6 +180,7 @@ class Window(QMainWindow):
         self.status = QLabel(f'Данные: {self.root}'); layout.addWidget(self.status)
         self.refresh()
         self.timer = QTimer(self); self.timer.timeout.connect(self.send_target); self.timer.start(100)
+        self.inference_timer=QTimer(self); self.inference_timer.timeout.connect(self.pump_recognition); self.inference_timer.start(200)
 
     def button(self, text, fn, primary=False):
         b=QPushButton(text); b.clicked.connect(lambda: self.guard(fn))
@@ -186,6 +202,13 @@ class Window(QMainWindow):
         buttons.addWidget(self.button('Открыть видео',self.open_video))
         buttons.addWidget(self.button('Стоп',self.stop_capture))
         self.motion_note=QLabel('Движение создаёт подсказку. Остатки меняются после подтверждения.'); self.motion_note.setWordWrap(True); left.addWidget(self.motion_note)
+        self.live_recognition=QCheckBox('Распознавать предмет на видео'); left.addWidget(self.live_recognition)
+        self.live_recognition.toggled.connect(lambda checked:self.guard(lambda:self.toggle_recognition(checked)))
+        options=QHBoxLayout(); left.addLayout(options)
+        options.addWidget(QLabel('Порог оценки модели'))
+        self.recognition_threshold=QDoubleSpinBox(); self.recognition_threshold.setRange(.0,1.0); self.recognition_threshold.setSingleStep(.05); self.recognition_threshold.setValue(.7); options.addWidget(self.recognition_threshold)
+        options.addWidget(self.button('Весь кадр',lambda:setattr(self.video,'roi',None)))
+        self.recognition_note=QLabel('Выделите предмет рамкой. Без рамки оценивается весь кадр; это не поиск нескольких объектов.'); self.recognition_note.setWordWrap(True); left.addWidget(self.recognition_note)
         panel=QVBoxLayout(); row.addLayout(panel,1); form=QFormLayout(); panel.addLayout(form)
         self.operator=QLineEdit(); self.operator.setPlaceholderText('Имя оператора'); form.addRow('Оператор',self.operator)
         self.barcode=QLineEdit(); self.barcode.setPlaceholderText('Штрихкод со сканера'); form.addRow('Товар',self.barcode)
@@ -330,6 +353,8 @@ class Window(QMainWindow):
 
     def stop_capture(self):
         self.follow.setChecked(False)
+        self.live_recognition.setChecked(False)
+        self.stop_recognition()
         if self.capture:
             self.capture.keep=False
             if not self.capture.wait(3000):
@@ -520,25 +545,69 @@ class Window(QMainWindow):
         if not metrics.exists(): raise ValueError('Нет отчёта проверки рядом с моделью')
         report=json.loads(metrics.read_text(encoding='utf-8'))
         if QMessageBox.question(self,'Активация модели',json.dumps(report,ensure_ascii=False,indent=2)+'\nИспользовать для подсказок оператору?')!=QMessageBox.Yes: return
+        self.live_recognition.setChecked(False); self.stop_recognition()
         (self.root/'models'/'active.json').write_text(json.dumps({'path':path,'report':report},ensure_ascii=False),encoding='utf-8')
         self.predictor=None; self.train_log.append('Модель активирована для подсказок; автоматический учёт выключен.')
 
     def predict(self):
-        if getattr(sys,'frozen',False):
-            active=json.loads((self.root/'models'/'active.json').read_text(encoding='utf-8'))
-            path=self.evidence(crop=True)
-            def run():
-                result=subprocess.run([self.train_python.text(),'-m','pikkabpe.train','--predict',str(path),'--model',active['path']],capture_output=True,text=True,encoding='utf-8',timeout=90,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0),env={**os.environ,'PYTHONIOENCODING':'utf-8'})
-                if result.returncode: raise RuntimeError(result.stderr)
-                return result.stdout
-            self.background(run,self.train_log.append)
-            return
-        from .train import Predictor
-        if self.predictor is None:
-            active=json.loads((self.root/'models'/'active.json').read_text(encoding='utf-8')); self.predictor=Predictor(active['path'])
-        path=self.evidence(crop=True)
-        code,confidence=self.predictor.predict(path)
-        self.train_log.append(f'Подсказка: {code}; оценка модели {confidence:.1%}. Требуется проверка оператором.')
+        if self.video.frame is None or not self.video.roi: raise ValueError('Откройте фото или видео и выделите предмет рамкой')
+        self.ensure_recognition()
+        self.manual_request=(self.video.frame.copy(),self.video.roi)
+        self.train_log.append('Распознаём выделенный предмет…')
+
+    def ensure_recognition(self):
+        if self.recognition.process is not None: return
+        path=self.root/'models'/'active.json'
+        if not path.exists(): raise ValueError('Сначала обучите и активируйте модель на вкладке «Обучение»')
+        active=json.loads(path.read_text(encoding='utf-8'))
+        self.recognition.start(self.train_python.text(),active['path'])
+
+    def toggle_recognition(self,checked):
+        if not checked: self.stop_recognition(); return
+        try: self.ensure_recognition()
+        except Exception:
+            self.live_recognition.blockSignals(True); self.live_recognition.setChecked(False); self.live_recognition.blockSignals(False)
+            raise
+
+    def stop_recognition(self):
+        self.recognition_generation+=1; self.manual_request=None; self.recognition.stop()
+        self.video.recognition_text=''; self.video.recognition_roi=None; self.video.update()
+        self.last_inferred_frame=-1; self.inference_roi=None
+
+    def recognition_message(self,text):
+        self.recognition_note.setText(text)
+        if self.recognition.process is None:
+            self.live_recognition.blockSignals(True); self.live_recognition.setChecked(False); self.live_recognition.blockSignals(False)
+            self.manual_request=None; self.video.recognition_text=''; self.video.update(); self.train_log.append(text)
+
+    def pump_recognition(self):
+        now=time.monotonic()
+        roi=self.video.roi or (0,0,1,1)
+        if roi!=self.inference_roi:
+            self.inference_roi=roi; self.recognition_generation+=1
+            self.video.recognition_text=''; self.video.update(); self.last_inferred_frame=-1
+        if self.result_until and now>self.result_until:
+            self.video.recognition_text=''; self.result_until=0; self.video.update()
+        if not self.recognition.ready or self.recognition.pending: return
+        if self.manual_request:
+            frame,area=self.manual_request
+            if self.recognition.submit(frame,area,self.recognition_generation,manual=True): self.manual_request=None
+        elif self.live_recognition.isChecked() and self.video.frame is not None and self.frame_count!=self.last_inferred_frame and now-self.last_inference>=.4:
+            if self.recognition.submit(self.video.frame,roi,self.recognition_generation):
+                self.last_inferred_frame=self.frame_count; self.last_inference=now
+
+    def recognition_result(self,result):
+        if result['generation']!=self.recognition_generation: return
+        if result['roi']!=(self.video.roi or (0,0,1,1)): return
+        if result.get('error'):
+            self.recognition_note.setText('Ошибка распознавания: '+result['error']); return
+        if not result['manual'] and time.monotonic()-result['submitted']>2: return
+        from .recognition import describe
+        text=describe(self.db,result['barcode'],result['score'],self.recognition_threshold.value())
+        self.video.recognition_text=text; self.video.recognition_roi=result['roi']; self.video.update()
+        self.result_until=time.monotonic()+(10 if result['manual'] else 2)
+        self.recognition_note.setText(text+' · подсказка модели, требуется проверка')
+        if result['manual']: self.train_log.append('Подсказка: '+text+'. Требуется проверка оператором.')
 
     def background(self,fn,done):
         worker=Work(fn); self.workers.append(worker); worker.done.connect(done)
