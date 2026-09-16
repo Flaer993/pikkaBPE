@@ -1,0 +1,102 @@
+[
+  {
+    "barcode": "DEMO-BATTERY",
+    "session": "commons-960127",
+    "source": "https://commons.wikimedia.org/wiki/File:Akku_AA_LR6_Mignon.jpg",
+    "license": "Public domain",
+    "author": "Marco Finke",
+    "license_url": "",
+    "title": "Akku AA LR6 Mignon.jpg",
+    "review": "assistant visual review required; demo classes only"
+  },
+  {
+    "barcode": "DEMO-BATTERY",
+    "session": "commons-41879771",
+    "source": "https://commons.wikimedia.org/wiki/File:Akku_NiZn_AAA_AA_by_NicoJenner.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "NicoJenner",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "title": "Akku NiZn AAA AA by NicoJenner.jpg",
+    "review": "assistant visual review required; demo classes only"
+  },
+  {
+    "barcode": "DEMO-BATTERY",
+    "session": "commons-136018852",
+    "source": "https://commons.wikimedia.org/wiki/File:Amazon_Basics_Rechargeable_AA_Battery.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "TaurusEmerald",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "title": "Amazon Basics Rechargeable AA Battery.jpg",
+    "review": "assistant visual review required; demo classes only"
+  },
+  {
+    "barcode": "DEMO-BATTERY",
+    "session": "commons-116727055",
+    "source": "https://commons.wikimedia.org/wiki/File:BAUHAUS_NiMH_AA_2300mAh.JPG",
+    "license": "CC BY-SA 3.0",
+    "author": "Dmitry G",
+    "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "title": "BAUHAUS NiMH AA 2300mAh.JPG",
+    "review": "assistant visual review required; demo classes only"
+  },
+  {
+    "barcode": "DEMO-BATTERY",
+    "session": "commons-85400526",
+    "source": "https://commons.wikimedia.org/wiki/File:Early_2000s_Rechargeable_Batteries.jpg",
+    "license": "CC BY-SA 4.0",
+    "author": "Multicherry",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "title": "Early 2000s Rechargeable Batteries.jpg",
+    "review": "assistant visual review required; demo classes only"
+  },
+  {
+    "barcode": "DEMO-RESISTOR",
+    "session": "commons-19170218",
+    "source": "https://commons.wikimedia.org/wiki/File:0.5_ohm_power_resistor.jpg",
+    "license": "CC BY-SA 3.0",
+    "author": "Kmashaye5220",
+    "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "title": "0.5 ohm power resistor.jpg",
+    "review": "assistant visual review required; demo classes only"
+  },
+  {
+    "barcode": "DEMO-RESISTOR",
+    "session": "commons-18680069",
+    "source": "https://commons.wikimedia.org/wiki/File:25_ohm_power_resistors.jpg",
+    "license": "CC BY-SA 3.0",
+    "author": "Kmashaye5220",
+    "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "title": "25 ohm power resistors.jpg",
+    "review": "assistant visual review required; demo classes only"
+  },
+  {
+    "barcode": "DEMO-RESISTOR",
+    "session": "commons-4058520",
+    "source": "https://commons.wikimedia.org/wiki/File:A_mountain_of_resistors.jpg",
+    "license": "CC BY-SA 3.0",
+    "author": "Mattia Luigi Nappi",
+    "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "title": "A mountain of resistors.jpg",
+    "review": "assistant visual review required; demo classes only"
+  },
+  {
+    "barcode": "DEMO-RESISTOR",
+    "session": "commons-27918950",
+    "source": "https://commons.wikimedia.org/wiki/File:Carbon_and_ceramic_resistors_of_different_power_ratings.jpg",
+    "license": "CC BY-SA 3.0",
+    "author": "David Ludovino",
+    "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "title": "Carbon and ceramic resistors of different power ratings.jpg",
+    "review": "assistant visual review required; demo classes only"
+  },
+  {
+    "barcode": "DEMO-RESISTOR",
+    "session": "commons-1534601",
+    "source": "https://commons.wikimedia.org/wiki/File:Electronic_component_resistors.jpg",
+    "license": "CC BY-SA 3.0",
+    "author": "me",
+    "license_url": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "title": "Electronic component resistors.jpg",
+    "review": "assistant visual review required; demo classes only"
+  }
+]

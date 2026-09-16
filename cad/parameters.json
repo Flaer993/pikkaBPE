@@ -1,0 +1,11 @@
+{
+  "revision": "P0-fit-prototype",
+  "units": "mm",
+  "ceiling": {"width": 150, "depth": 120, "thickness": 4, "corner_cut": 18, "hole_pitch_x": 120, "hole_pitch_y": 90, "clearance_M5": 5.5},
+  "servo": {"body_length": 40.7, "body_width": 19.7, "body_height": 42.9, "shaft_offset_from_body_center": 10.5, "mount_pitch_long": 49.5, "mount_pitch_short": 10, "clearance_M3": 3.4, "body_clearance": 0.6, "mount_dimensions_verified": false},
+  "pan_bearing": {"designation": "6806", "bore": 30, "outer": 42, "width": 7, "housing_clearance": 0.2},
+  "camera": {"body_width": 94, "body_depth": 24, "body_height": 29, "mass_g": 162, "mount": "1/4-20 UNC", "screw_clearance": 6.6, "clip_envelope_assumed": [100,75,50]},
+  "print": {"material": "PETG prototype", "layer": 0.2, "walls": 5, "infill_percent": 40, "fit_coupon_required": true},
+  "motion": {"pan_initial_deg": [-60,60], "tilt_initial_deg": [-45,45], "required_zone_deg": 180, "full_sweep_requires_physical_calibration": true},
+  "status": "Layout and fit prototype. No load certification. Servo horn holes, clip envelope and ceiling substrate require measurement."
+}

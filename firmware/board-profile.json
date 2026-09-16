@@ -1,0 +1,15 @@
+{
+  "board": "PB_MCU01_H503A",
+  "mcu_family": "STM32H503",
+  "usb_uart": "onboard, user confirmed; net routing not yet verified",
+  "flash_ready": false,
+  "uart_instance": null,
+  "uart_tx_pin": null,
+  "uart_rx_pin": null,
+  "pan_pwm_pin": null,
+  "tilt_pwm_pin": null,
+  "servo_supply_design_v": 6.0,
+  "servo_supply_design_a": 5.0,
+  "supply_note": "Initial engineering budget; measure simultaneous startup/stall current. Not an MCU pin rating.",
+  "reason": "No authoritative board schematic found. Do not invent pin mapping. Need schematic or vendor pinout."
+}

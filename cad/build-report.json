@@ -1,0 +1,166 @@
+{
+  "revision": "P0-fit-prototype",
+  "solidworks": "32.4.0",
+  "parts": [
+    {
+      "name": "01_Ceiling_M5",
+      "path": "D:\\pikkaBPE\\cad\\native\\01_Ceiling_M5.SLDPRT",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": null
+    },
+    {
+      "name": "02_Pan_servo_deck",
+      "path": "D:\\pikkaBPE\\cad\\native\\02_Pan_servo_deck.SLDPRT",
+      "position": [
+        0,
+        0,
+        50
+      ],
+      "rotation": null
+    },
+    {
+      "name": "03_Bearing_housing_6806",
+      "path": "D:\\pikkaBPE\\cad\\native\\03_Bearing_housing_6806.SLDPRT",
+      "position": [
+        0,
+        0,
+        58
+      ],
+      "rotation": null
+    },
+    {
+      "name": "04_Bearing_retainer",
+      "path": "D:\\pikkaBPE\\cad\\native\\04_Bearing_retainer.SLDPRT",
+      "position": [
+        0,
+        0,
+        65.2
+      ],
+      "rotation": null
+    },
+    {
+      "name": "05_Pan_horn_journal",
+      "path": "D:\\pikkaBPE\\cad\\native\\05_Pan_horn_journal.SLDPRT",
+      "position": [
+        0,
+        0,
+        58
+      ],
+      "rotation": null
+    },
+    {
+      "name": "06_Rotating_yoke",
+      "path": "D:\\pikkaBPE\\cad\\native\\06_Rotating_yoke.SLDPRT",
+      "position": [
+        0,
+        0,
+        70
+      ],
+      "rotation": null
+    },
+    {
+      "name": "07_Tilt_drive_cheek",
+      "path": "D:\\pikkaBPE\\cad\\native\\07_Tilt_drive_cheek.SLDPRT",
+      "position": [
+        -80,
+        0,
+        76
+      ],
+      "rotation": [
+        0,
+        1,
+        0,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "08_Tilt_idler_cheek",
+      "path": "D:\\pikkaBPE\\cad\\native\\08_Tilt_idler_cheek.SLDPRT",
+      "position": [
+        74,
+        0,
+        76
+      ],
+      "rotation": [
+        0,
+        1,
+        0,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "09_C920_tripod_tray",
+      "path": "D:\\pikkaBPE\\cad\\native\\09_C920_tripod_tray.SLDPRT",
+      "position": [
+        0,
+        0,
+        158
+      ],
+      "rotation": null
+    },
+    {
+      "name": "10_Camera_side_ear",
+      "path": "D:\\pikkaBPE\\cad\\native\\10_Camera_side_ear.SLDPRT",
+      "position": [
+        -63,
+        0,
+        158
+      ],
+      "rotation": [
+        0,
+        1,
+        0,
+        0,
+        0,
+        -1,
+        -1,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "11_Standoff_46mm",
+      "path": "D:\\pikkaBPE\\cad\\native\\11_Standoff_46mm.SLDPRT",
+      "position": [
+        -36,
+        -25,
+        4
+      ],
+      "rotation": null
+    },
+    {
+      "name": "12_Corner_cleat",
+      "path": "D:\\pikkaBPE\\cad\\native\\12_Corner_cleat.SLDPRT",
+      "position": [
+        -68,
+        -24,
+        76
+      ],
+      "rotation": null
+    }
+  ],
+  "placements": 15,
+  "assembly_type": "fixed layout; not a kinematic simulation",
+  "unverified": [
+    "servo mounting holes",
+    "horn pattern",
+    "shaft retention and metal load path",
+    "corner cleat drill patterns",
+    "ceiling substrate",
+    "clearance through swept motion"
+  ]
+}

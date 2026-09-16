@@ -1,0 +1,28 @@
+{
+  "kind": "object_crop_classifier",
+  "gpu": "NVIDIA GeForce RTX 3060",
+  "train_samples": 8,
+  "validation_samples": 2,
+  "validation_sessions": [
+    "commons-18680069",
+    "commons-41879771"
+  ],
+  "classes": [
+    "DEMO-BATTERY",
+    "DEMO-RESISTOR"
+  ],
+  "accuracy": 1.0,
+  "confusion_matrix": [
+    [
+      1,
+      0
+    ],
+    [
+      0,
+      1
+    ]
+  ],
+  "epochs": 10,
+  "autonomous_stock_enabled": false,
+  "note": "Small pilot metrics do not establish warehouse accuracy."
+}
