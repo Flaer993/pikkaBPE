@@ -22,7 +22,7 @@ styles.add(ParagraphStyle(name='TitleRU',fontName='UI-Bold',fontSize=34,leading=
 def footer(c,doc):
     c.setStrokeColor(HexColor('#f5822b')); c.line(42,40,553,40)
     c.setFont('UI',8); c.setFillColor(HexColor('#64717c'))
-    c.drawString(42,26,'pikkāBPE / 0.1.2 / P0 / домашний прототип')
+    c.drawString(42,26,'pikkāBPE / 0.2.0 / P0 / домашний прототип')
     c.drawRightString(553,26,str(doc.page))
 
 story=[Spacer(1,35),Paragraph('pikkāBPE',styles['TitleRU']),Paragraph('Камера. Подвес. Операторский учёт.',styles['HeadingRU']),Paragraph('Минимальная документация / 16 сентября 2026',styles['BodyRU'])]
@@ -35,8 +35,8 @@ for section in text.split('\n## ')[1:]:
     heading,body=section.split('\n',1)
     story.append(Paragraph(escape(heading),styles['HeadingRU']))
     if heading.startswith('02.'):
-        preview=ROOT/'data'/'client-preview.png'
-        if preview.exists(): story.append(Image(str(preview),width=490,height=315)); story.append(Spacer(1,12))
+        preview=ROOT/'docs'/'images'/'dashboard-light.png'
+        if preview.exists(): story.append(Image(str(preview),width=420,height=270)); story.append(Spacer(1,12))
     for paragraph in re.split(r'\n\s*\n',body.strip()):
         value=escape(' '.join(paragraph.splitlines()))
         story.append(Paragraph(value,styles['BodyRU']))

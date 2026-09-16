@@ -52,7 +52,7 @@ def transforms_for(train=False):
     return transforms.Compose(ops+[transforms.ToTensor(),transforms.Normalize([.485,.456,.406],[.229,.224,.225])])
 
 
-def train_model(root,epochs,pretrained=True):
+def train_model(root,epochs,pretrained=True,catalog_pilot=False):
     import torch
     from torch import nn
     from torchvision.models import mobilenet_v3_small, MobileNet_V3_Small_Weights
@@ -61,7 +61,11 @@ def train_model(root,epochs,pretrained=True):
     random.seed(42); torch.manual_seed(42)
     root=Path(root); os.environ.setdefault('TORCH_HOME',str(root/'models'/'cache'))
     rows=Store(root/'warehouse.db').rows('SELECT * FROM labels ORDER BY id')
-    training,validation,classes=split_sessions(rows)
+    if catalog_pilot:
+        training=rows; validation=[]; classes=sorted({r['barcode'] for r in rows})
+        if len(classes)<2: raise ValueError('Для каталожного пилота нужны хотя бы два товара')
+        print('CATALOG PILOT: no independent validation; do not use for autonomous inventory.',flush=True)
+    else: training,validation,classes=split_sessions(rows)
     class Dataset(torch.utils.data.Dataset):
         def __init__(self,items,augment): self.items=items; self.transform=transforms_for(augment)
         def __len__(self): return len(self.items)
@@ -90,7 +94,7 @@ def train_model(root,epochs,pretrained=True):
         for inputs,labels in val_loader:
             predicted=model(inputs.cuda()).argmax(1).cpu()
             for actual,pred in zip(labels,predicted): matrix[actual,pred]+=1
-    report={'kind':'object_crop_classifier','gpu':torch.cuda.get_device_name(0),'train_samples':len(training),'validation_samples':len(validation),'validation_sessions':sorted({r['session'] for r in validation}),'classes':classes,'accuracy':matrix.diag().sum().item()/len(validation),'confusion_matrix':matrix.tolist(),'epochs':epochs,'autonomous_stock_enabled':False,'note':'Small pilot metrics do not establish warehouse accuracy.'}
+    report={'kind':'catalog_pilot_unvalidated' if catalog_pilot else 'object_crop_classifier','gpu':torch.cuda.get_device_name(0),'train_samples':len(training),'validation_samples':len(validation),'validation_sessions':sorted({r['session'] for r in validation}),'classes':classes,'accuracy':matrix.diag().sum().item()/len(validation) if validation else None,'confusion_matrix':matrix.tolist() if validation else None,'epochs':epochs,'autonomous_stock_enabled':False,'note':'No independent validation. Catalog-only prototype; operator review required.' if catalog_pilot else 'Small pilot metrics do not establish warehouse accuracy.'}
     out=root/'models'/f'candidate-{time.strftime("%Y%m%d-%H%M%S")}.pt'; out.parent.mkdir(parents=True,exist_ok=True)
     torch.save({'state_dict':{k:v.cpu() for k,v in model.state_dict().items()},'classes':classes,'architecture':'mobilenet_v3_small'},out)
     out.with_suffix('.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
@@ -139,6 +143,7 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--data'); parser.add_argument('--epochs',type=int,default=10)
     parser.add_argument('--predict'); parser.add_argument('--model')
     parser.add_argument('--serve',action='store_true')
+    parser.add_argument('--catalog-pilot',action='store_true',help='Explicit unvalidated catalog experiment; never used by normal UI training')
     args=parser.parse_args()
     if args.serve:
         if not args.model: parser.error('--model is required')
@@ -146,5 +151,5 @@ if __name__=='__main__':
     elif args.predict:
         if not args.model: parser.error('--model is required for prediction')
         code,score=Predictor(args.model).predict(args.predict); print(f'{code}: {score:.1%}')
-    elif args.data: train_model(args.data,args.epochs)
+    elif args.data: train_model(args.data,args.epochs,catalog_pilot=args.catalog_pilot)
     else: parser.error('--data is required for training')

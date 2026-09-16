@@ -11,29 +11,18 @@ from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRect, QProcess, QProces
 from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QIcon
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QFormLayout, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTabWidget,
-    QTableWidget, QTableWidgetItem, QMessageBox, QFileDialog, QCheckBox, QSplitter, QTextEdit, QInputDialog)
+    QTableWidget, QTableWidgetItem, QMessageBox, QFileDialog, QCheckBox, QSplitter, QTextEdit, QInputDialog,
+    QFrame, QScrollArea, QGridLayout, QHeaderView)
 
 from . import __version__
 from .paths import data_root
 from .store import Store
 from .motion import Motion
 from .serial_link import Link
+from .themes import stylesheet
 
 
-STYLE = '''
-QMainWindow,QWidget {background:#171b20;color:#ecedef;font-family:Segoe UI;font-size:13px;}
-QLabel#brand {font-size:30px;font-weight:700;color:#ff8a32;}
-QLabel#subtitle {color:#a0a8b1;font-size:12px;}
-QPushButton {background:#303740;border:1px solid #46505b;padding:10px 15px;border-radius:6px;}
-QPushButton:hover {border-color:#ff8a32;background:#3e4146;}
-QPushButton#primary {background:#f5822b;color:#171b20;font-weight:700;border:none;}
-QLineEdit,QComboBox,QSpinBox,QDoubleSpinBox,QTextEdit {background:#232931;border:1px solid #3d4650;padding:7px;border-radius:4px;}
-QTabWidget::pane {border:1px solid #353e47;}
-QTabBar::tab {background:#252b33;padding:12px 20px;}
-QTabBar::tab:selected {color:#ff8a32;border-bottom:2px solid #ff8a32;}
-QHeaderView::section {background:#303740;color:#dce0e4;padding:8px;border:0;}
-QTableWidget {background:#20262d;gridline-color:#333c46;selection-background-color:#75451f;}
-'''
+STYLE = stylesheet('dark')
 
 
 class Video(QLabel):
@@ -150,6 +139,8 @@ class Window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.root = data_root()
+        try: self.preferences=json.loads((self.root/'preferences.json').read_text(encoding='utf-8'))
+        except (OSError,ValueError): self.preferences={}
         self.db = Store(self.root/'warehouse.db')
         self.motion = Motion()
         self.link = Link()
@@ -170,14 +161,33 @@ class Window(QMainWindow):
         self.logo_path=Path(__file__).parent/'assets'/'logo.svg'
         self.setWindowIcon(QIcon(str(self.logo_path)))
         self.resize(1400, 900)
-        base = QWidget(); self.setCentralWidget(base); layout = QVBoxLayout(base)
+        base = QWidget(); base.setObjectName('workspace'); self.setCentralWidget(base); shell=QHBoxLayout(base); shell.setContentsMargins(16,16,16,16); shell.setSpacing(20)
+        sidebar=QWidget(); sidebar.setObjectName('sidebar'); sidebar.setFixedWidth(196); side=QVBoxLayout(sidebar); side.setContentsMargins(14,20,14,18); side.setSpacing(8); shell.addWidget(sidebar)
+        logo=QLabel(); logo.setPixmap(QIcon(str(self.logo_path)).pixmap(52,52)); side.addWidget(logo)
+        brand=QLabel('pikkāBPE'); brand.setObjectName('brand'); side.addWidget(brand)
+        subtitle=QLabel('WAREHOUSE VISION'); subtitle.setObjectName('muted'); side.addWidget(subtitle); side.addSpacing(28)
+        self.nav_buttons={}
+        for index,title in [(5,'Обзор склада'),(0,'Камера'),(1,'События и остатки'),(4,'Товары и команда'),(2,'Обучение'),(3,'Настройки')]:
+            button=self.button(title,lambda i=index:self.tabs.setCurrentIndex(i)); button.setObjectName('nav'); button.setCheckable(True); side.addWidget(button); self.nav_buttons[index]=button
+        side.addStretch(); side.addWidget(QLabel('Одна зона · 7 стеллажей'))
+        self.theme_combo=QComboBox(); self.theme_combo.addItem('Тёмная тема','dark'); self.theme_combo.addItem('Светлая тема','light'); side.addWidget(self.theme_combo)
+        side.addWidget(QLabel('Версия '+__version__))
+        content=QWidget(); layout=QVBoxLayout(content); layout.setContentsMargins(0,0,0,0); layout.setSpacing(16); shell.addWidget(content,1)
         header=QHBoxLayout(); layout.addLayout(header)
-        logo=QLabel(); logo.setPixmap(QIcon(str(self.logo_path)).pixmap(64,64)); header.addWidget(logo)
-        brand = QLabel('pikkāBPE   /   VISION CONTROL'); brand.setObjectName('brand'); header.addWidget(brand); header.addStretch()
-        sub = QLabel('ОДНА ЗОНА   •   ОБУЧЕНИЕ С ОПЕРАТОРОМ   •   ЛОКАЛЬНЫЙ УЧЁТ'); sub.setObjectName('subtitle'); layout.addWidget(sub)
+        self.page_title=QLabel('Обзор склада'); self.page_title.setObjectName('pageTitle'); header.addWidget(self.page_title); header.addStretch()
+        header.addWidget(QLabel('Оператор'))
+        self.operator=QLineEdit(self.preferences.get('operator','')); self.operator.setPlaceholderText('Ваше имя'); self.operator.setMaximumWidth(220); header.addWidget(self.operator)
+        self.operator.editingFinished.connect(self.save_preferences)
         self.tabs = QTabWidget(); layout.addWidget(self.tabs)
-        self.build_camera(); self.build_inventory(); self.build_training(); self.build_updates(); self.build_catalogs()
-        self.status = QLabel(f'Данные: {self.root}'); layout.addWidget(self.status)
+        self.build_camera(); self.build_inventory(); self.build_training(); self.build_updates(); self.build_catalogs(); self.build_dashboard()
+        for index in range(self.tabs.count()):
+            page=self.tabs.widget(index); title=self.tabs.tabText(index); self.tabs.removeTab(index)
+            scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(page); self.tabs.insertTab(index,scroll,title)
+        self.tabs.tabBar().hide(); self.tabs.currentChanged.connect(self.navigate)
+        self.status = QLabel('Готово к работе'); self.status.setObjectName('muted'); layout.addWidget(self.status)
+        self.theme_combo.setCurrentIndex(max(0,self.theme_combo.findData(self.preferences.get('theme','dark'))))
+        self.theme_combo.currentIndexChanged.connect(self.apply_theme); self.apply_theme()
+        self.tabs.setCurrentIndex(5); self.navigate(5)
         self.refresh()
         self.timer = QTimer(self); self.timer.timeout.connect(self.send_target); self.timer.start(100)
         self.inference_timer=QTimer(self); self.inference_timer.timeout.connect(self.pump_recognition); self.inference_timer.start(200)
@@ -186,6 +196,40 @@ class Window(QMainWindow):
         b=QPushButton(text); b.clicked.connect(lambda: self.guard(fn))
         if primary: b.setObjectName('primary')
         return b
+
+    def save_preferences(self):
+        self.preferences.update(operator=self.operator.text(),theme=self.theme_combo.currentData())
+        (self.root/'preferences.json').write_text(json.dumps(self.preferences,ensure_ascii=False),encoding='utf-8')
+
+    def apply_theme(self):
+        self.setStyleSheet(stylesheet(self.theme_combo.currentData())); self.save_preferences()
+
+    def navigate(self,index):
+        for i,button in self.nav_buttons.items(): button.setChecked(i==index)
+        self.page_title.setText(self.nav_buttons[index].text())
+
+    def card(self,title,parent):
+        frame=QFrame(); frame.setObjectName('card'); box=QVBoxLayout(frame); box.setContentsMargins(20,18,20,18); box.setSpacing(12)
+        if title:
+            label=QLabel(title); label.setObjectName('sectionTitle'); label.setWordWrap(True); box.addWidget(label)
+        parent.addWidget(frame)
+        return box
+
+    def build_dashboard(self):
+        page=QWidget(); self.tabs.addTab(page,'Обзор'); box=QVBoxLayout(page); box.setSpacing(18)
+        intro=QLabel('Всё, что нужно для работы со складом, — на одном экране.'); intro.setObjectName('muted'); box.addWidget(intro)
+        metrics=QHBoxLayout(); metrics.setSpacing(14); box.addLayout(metrics); self.metric_labels={}
+        for key,title in [('products','Товаров в каталоге'),('pending','Ждут проверки'),('stock','Единиц на складе'),('photos','Фото для обучения')]:
+            card=self.card(title,metrics); value=QLabel('0'); value.setObjectName('statValue'); card.addWidget(value); self.metric_labels[key]=value
+        row=QHBoxLayout(); row.setSpacing(18); box.addLayout(row)
+        quick=self.card('Начать работу',row)
+        for title,index in [('Открыть камеру',0),('Проверить события',1),('Добавить товар или сотрудника',4),('Добавить фото и обучить',2)]: quick.addWidget(self.button(title,lambda i=index:self.tabs.setCurrentIndex(i),index==0))
+        health=self.card('Готовность системы',row)
+        self.dashboard_health=QLabel(''); self.dashboard_health.setWordWrap(True); health.addWidget(self.dashboard_health); health.addStretch()
+        health.addWidget(self.button('Обновить обзор',self.refresh))
+        latest=self.card('Последние события',box)
+        self.recent_events=QTableWidget(); latest.addWidget(self.recent_events)
+        empty=QLabel('Начните с каталога, затем добавьте поступление и подтвердите размещение на складе.'); empty.setWordWrap(True); empty.setObjectName('muted'); box.addWidget(empty)
 
     def guard(self, fn):
         try: fn()
@@ -209,9 +253,11 @@ class Window(QMainWindow):
         self.recognition_threshold=QDoubleSpinBox(); self.recognition_threshold.setRange(.0,1.0); self.recognition_threshold.setSingleStep(.05); self.recognition_threshold.setValue(.7); options.addWidget(self.recognition_threshold)
         options.addWidget(self.button('Весь кадр',lambda:setattr(self.video,'roi',None)))
         self.recognition_note=QLabel('Выделите предмет рамкой. Без рамки оценивается весь кадр; это не поиск нескольких объектов.'); self.recognition_note.setWordWrap(True); left.addWidget(self.recognition_note)
-        panel=QVBoxLayout(); row.addLayout(panel,1); form=QFormLayout(); panel.addLayout(form)
-        self.operator=QLineEdit(); self.operator.setPlaceholderText('Имя оператора'); form.addRow('Оператор',self.operator)
+        panel=self.card('',row); form=QFormLayout(); panel.addLayout(form)
+        panel.insertWidget(0,QLabel('НОВОЕ СОБЫТИЕ'))
         self.barcode=QLineEdit(); self.barcode.setPlaceholderText('Штрихкод со сканера'); form.addRow('Товар',self.barcode)
+        self.product_picker=QComboBox(); form.addRow('Из каталога',self.product_picker)
+        self.product_picker.activated.connect(self.choose_product)
         self.barcode.returnPressed.connect(self.lookup)
         self.product_name=QLabel('Введите код товара'); self.product_name.setWordWrap(True); form.addRow('',self.product_name)
         panel.addWidget(self.button('Найти / добавить товар',self.lookup))
@@ -223,21 +269,25 @@ class Window(QMainWindow):
         self.quantity=QSpinBox(); self.quantity.setRange(1,100000); form.addRow('Количество, шт',self.quantity)
         self.receipt_combo=QComboBox(); form.addRow('Поступление',self.receipt_combo)
         panel.addWidget(self.button('В очередь подтверждения',self.propose,True))
-        panel.addWidget(QLabel('ПОДВЕС / USB CDC · COM'))
-        self.com=QLineEdit(); self.com.setPlaceholderText('COM3'); panel.addWidget(self.com)
-        panel.addWidget(self.button('Подключить контроллер',lambda:self.link.open(self.com.text())))
-        self.pan=QDoubleSpinBox(); self.pan.setRange(-60,60); self.pan.setSuffix('°'); form2=QFormLayout(); panel.addLayout(form2); form2.addRow('Поворот',self.pan)
+        toggle=QCheckBox('Управление подвесом'); panel.addWidget(toggle)
+        hardware=QWidget(); hw=QVBoxLayout(hardware); hw.setContentsMargins(0,0,0,0); panel.addWidget(hardware); hardware.hide(); toggle.toggled.connect(hardware.setVisible)
+        self.com=QLineEdit(); self.com.setPlaceholderText('COM3'); hw.addWidget(self.com)
+        hw.addWidget(self.button('Подключить контроллер',lambda:self.link.open(self.com.text())))
+        self.pan=QDoubleSpinBox(); self.pan.setRange(-60,60); self.pan.setSuffix('°'); form2=QFormLayout(); hw.addLayout(form2); form2.addRow('Поворот',self.pan)
         self.tilt=QDoubleSpinBox(); self.tilt.setRange(-45,45); self.tilt.setSuffix('°'); form2.addRow('Наклон',self.tilt)
         self.pan.valueChanged.connect(self.motion.camera_moved); self.tilt.valueChanged.connect(self.motion.camera_moved)
-        self.follow=QCheckBox('Сопровождать движение'); panel.addWidget(self.follow)
-        panel.addWidget(self.button('Остановить сопровождение',lambda:self.follow.setChecked(False)))
+        self.follow=QCheckBox('Сопровождать движение'); hw.addWidget(self.follow)
+        hw.addWidget(self.button('Остановить сопровождение',lambda:self.follow.setChecked(False)))
         self.link_state=QLabel('Контроллер не подключён'); panel.addWidget(self.link_state)
         panel.addStretch()
 
     def build_inventory(self):
         page=QWidget(); self.tabs.addTab(page,'События и остатки'); box=QVBoxLayout(page)
         buttons=QHBoxLayout(); box.addLayout(buttons)
-        for title, fn in [('Подтвердить',lambda:self.review(True)),('Отклонить',lambda:self.review(False)),('Кадр',self.show_evidence),('Поступление',self.add_receipt),('Сотрудник',lambda:self.add_catalog('employees')),('Новое место',lambda:self.add_catalog('locations')),('Экспорт CSV',self.export),('Резервная копия',self.backup),('Обновить',self.refresh)]: buttons.addWidget(self.button(title,fn))
+        for title, fn in [('Подтвердить',lambda:self.review(True)),('Отклонить',lambda:self.review(False)),('Открыть кадр',self.show_evidence),('Новое поступление',self.add_receipt)]: buttons.addWidget(self.button(title,fn,title=='Подтвердить'))
+        tools=QHBoxLayout(); box.addLayout(tools)
+        self.event_search=QLineEdit(); self.event_search.setPlaceholderText('Поиск по товару, сотруднику или месту'); self.event_search.textChanged.connect(self.filter_events); tools.addWidget(self.event_search)
+        for title, fn in [('Новое место',lambda:self.add_catalog('locations')),('Экспорт CSV',self.export),('Обновить',self.refresh)]: tools.addWidget(self.button(title,fn))
         self.events=QTableWidget(); self.events.setSelectionBehavior(QTableWidget.SelectRows); box.addWidget(self.events,3)
         box.addWidget(self.button('Удалить выбранное событие',self.delete_event))
         box.addWidget(QLabel('ПОДТВЕРЖДЁННЫЕ ОСТАТКИ / ОЖИДАЕМЫЕ ПОСТУПЛЕНИЯ'))
@@ -247,29 +297,33 @@ class Window(QMainWindow):
 
     def build_training(self):
         page=QWidget(); self.tabs.addTab(page,'Обучение'); box=QVBoxLayout(page)
-        note=QLabel('1. Выберите товар. 2. Добавьте фотографии этого предмета. 3. Нажмите «Обучить на NVIDIA».\nНа каждой фотографии должен быть один выбранный предмет крупным планом. Для обрезки используйте «Открыть фото для выделения».\nДля проверки нужны минимум два товара, каждый в двух независимых съёмках. Сотрудника и операцию подтверждает оператор.'); note.setWordWrap(True); box.addWidget(note)
-        form=QFormLayout(); box.addLayout(form)
+        note=QLabel('Научите камеру узнавать ваши товары. Добавляйте крупные снимки одного предмета с разных ракурсов.'); note.setWordWrap(True); note.setObjectName('muted'); box.addWidget(note)
+        step=self.card('01  ·  Выберите товар и добавьте фотографии',box)
+        form=QFormLayout(); step.addLayout(form)
         self.training_product=QComboBox(); form.addRow('Товар на фотографиях',self.training_product)
-        photos=QHBoxLayout(); box.addLayout(photos)
+        photos=QHBoxLayout(); step.addLayout(photos)
         photos.addWidget(self.button('Добавить фотографии товара',self.add_photos,True))
         photos.addWidget(self.button('Новая съёмка',lambda:self.session.setText(time.strftime('%Y-%m-%d-%H%M%S'))))
-        self.photo_summary=QLabel(''); self.photo_summary.setWordWrap(True); box.addWidget(self.photo_summary)
-        self.training_hint=QLabel(''); self.training_hint.setWordWrap(True); self.training_hint.setStyleSheet('color:#ffb577;padding:8px;background:#232931;'); box.addWidget(self.training_hint)
-        self.models_note=QLabel(''); self.models_note.setWordWrap(True); box.addWidget(self.models_note)
-        box.addWidget(self.button('Открыть папку моделей',lambda:os.startfile(self.root/'models')))
+        self.photo_summary=QLabel(''); self.photo_summary.setWordWrap(True); step.addWidget(self.photo_summary)
+        second=self.card('02  ·  Проверьте данные и запустите обучение',box)
+        self.training_hint=QLabel(''); self.training_hint.setWordWrap(True); second.addWidget(self.training_hint)
         self.session=QLineEdit(time.strftime('%Y-%m-%d')+'-home-01'); form.addRow('Сессия съёмки',self.session)
         self.source=QLineEdit('Собственная съёмка'); form.addRow('Источник / права',self.source)
-        self.epochs=QSpinBox(); self.epochs.setRange(1,100); self.epochs.setValue(10); form.addRow('Эпохи',self.epochs)
+        advanced=QWidget(); advanced_form=QFormLayout(advanced); advanced_form.setContentsMargins(0,0,0,0)
+        show_advanced=QCheckBox('Параметры обучения'); second.addWidget(show_advanced); second.addWidget(advanced); advanced.hide(); show_advanced.toggled.connect(advanced.setVisible)
+        self.epochs=QSpinBox(); self.epochs.setRange(1,100); self.epochs.setValue(10); advanced_form.addRow('Проходов по данным',self.epochs)
         local_python=Path('D:/pikkaBPE/.venv/Scripts/python.exe')
-        self.train_python=QLineEdit(str(Path(sys.executable)) if not getattr(sys,'frozen',False) else (str(local_python) if local_python.exists() else '')); form.addRow('Python окружения обучения',self.train_python)
-        row=QHBoxLayout(); box.addLayout(row)
-        row.addWidget(self.button('Сохранить выделенный пример',self.save_label,True))
-        row.addWidget(self.button('Открыть фото для выделения',self.import_image))
-        row.addWidget(self.button('Обучить на NVIDIA',self.train))
-        row=QHBoxLayout(); box.addLayout(row)
+        self.train_python=QLineEdit(str(Path(sys.executable)) if not getattr(sys,'frozen',False) else (str(local_python) if local_python.exists() else '')); advanced_form.addRow('Python для NVIDIA',self.train_python)
+        crop=QHBoxLayout(); step.addLayout(crop); crop.addWidget(self.button('Открыть фото для выделения',self.import_image)); crop.addWidget(self.button('Сохранить выделенный пример',self.save_label))
+        row=QHBoxLayout(); second.addLayout(row)
+        row.addWidget(self.button('Обучить на NVIDIA',self.train,True))
         row.addWidget(self.button('Остановить обучение',self.stop_training))
+        third=self.card('03  ·  Проверьте и включите модель',box)
+        self.models_note=QLabel(''); self.models_note.setWordWrap(True); self.models_note.setObjectName('muted'); third.addWidget(self.models_note)
+        row=QHBoxLayout(); third.addLayout(row)
         row.addWidget(self.button('Активировать модель',self.promote))
         row.addWidget(self.button('Распознать выделенный предмет',self.predict))
+        row.addWidget(self.button('Папка моделей',lambda:os.startfile(self.root/'models')))
         self.train_log=QTextEdit(); self.train_log.setReadOnly(True); box.addWidget(self.train_log)
 
     def build_catalogs(self):
@@ -282,12 +336,31 @@ class Window(QMainWindow):
         self.employees_table=QTableWidget(); self.employees_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.employees_table.itemSelectionChanged.connect(self.select_employee); box.addWidget(self.employees_table)
         box.addWidget(QLabel('ТОВАРЫ — для нового предмета без кода штрихкод создаётся автоматически'))
+        self.catalog_search=QLineEdit(); self.catalog_search.setPlaceholderText('Поиск товара по названию или штрихкоду'); self.catalog_search.textChanged.connect(self.filter_catalog); box.addWidget(self.catalog_search)
+        box.addWidget(self.button('Добавить товары из каталога ИНТЭР',self.import_energy_catalog))
         row=QHBoxLayout(); box.addLayout(row)
         self.new_product_name=QLineEdit(); self.new_product_name.setPlaceholderText('Название нового предмета'); row.addWidget(self.new_product_name)
         self.new_product_code=QLineEdit(); self.new_product_code.setPlaceholderText('Существующий штрихкод (необязательно)'); row.addWidget(self.new_product_code)
         row.addWidget(self.button('Добавить товар и штрихкод',self.add_product,True))
         row.addWidget(self.button('Открыть штрихкод выбранного',self.open_barcode))
         self.products_table=QTableWidget(); self.products_table.setSelectionBehavior(QTableWidget.SelectRows); box.addWidget(self.products_table)
+
+    def filter_catalog(self):
+        self.filter_table(self.products_table,self.catalog_search.text())
+
+    def import_energy_catalog(self):
+        from .catalog import import_catalog
+        self.backup(silent=True)
+        count=import_catalog(self.db); self.refresh(); self.status.setText(f'Добавлено товаров из каталога ИНТЭР: {count}. Остатки не менялись.')
+
+    def filter_events(self):
+        self.filter_table(self.events,self.event_search.text())
+
+    @staticmethod
+    def filter_table(table,text):
+        text=text.strip().casefold()
+        for row in range(table.rowCount()):
+            table.setRowHidden(row,bool(text) and not any(text in table.item(row,c).text().casefold() for c in range(table.columnCount()) if table.item(row,c)))
 
     def add_employee(self):
         key='EMP-'+uuid.uuid4().hex[:12]
@@ -404,6 +477,10 @@ class Window(QMainWindow):
             self.refresh()
         self.product_name.setText(rows[0]['name'])
 
+    def choose_product(self):
+        code=self.product_picker.currentData()
+        if code: self.barcode.setText(code); self.lookup()
+
     def add_catalog(self,table):
         code,ok=QInputDialog.getText(self,'Справочник','Код:')
         if not ok: return
@@ -411,8 +488,12 @@ class Window(QMainWindow):
         if ok: self.db.catalog(table,code,name); self.refresh()
 
     def add_receipt(self):
-        code,ok=QInputDialog.getText(self,'Поступление','Штрихкод существующего товара:')
+        products=self.db.rows('SELECT * FROM products ORDER BY name')
+        if not products: raise ValueError('Сначала добавьте товар в разделе «Товары и команда»')
+        options=[f"{p['name']} · {p['barcode']}" for p in products]
+        chosen,ok=QInputDialog.getItem(self,'Новое поступление','Выберите товар:',options,0,False)
         if not ok: return
+        code=products[options.index(chosen)]['barcode']
         quantity,ok=QInputDialog.getInt(self,'Поступление','Ожидаемое количество:',1,1,100000)
         if ok: self.db.receipt(code,quantity); self.refresh()
 
@@ -463,8 +544,14 @@ class Window(QMainWindow):
         table.setColumnCount(len(columns)); table.setHorizontalHeaderLabels([label for _,label in columns]); table.setRowCount(len(rows))
         table.setEditTriggers(QTableWidget.NoEditTriggers)
         for r,row in enumerate(rows):
-            for c,(key,_) in enumerate(columns): table.setItem(r,c,QTableWidgetItem(str(row.get(key) or '')))
+            for c,(key,_) in enumerate(columns):
+                value=row.get(key)
+                if key=='kind': value={'take':'Взятие','return':'Возврат','place':'Размещение'}.get(value,value)
+                if key=='status': value={'pending':'На проверке','confirmed':'Подтверждено','rejected':'Отклонено'}.get(value,value)
+                table.setItem(r,c,QTableWidgetItem('' if value is None else str(value)))
         table.resizeColumnsToContents()
+        table.setAlternatingRowColors(True); table.verticalHeader().hide(); table.verticalHeader().setDefaultSectionSize(42)
+        table.horizontalHeader().setStretchLastSection(True)
 
     def refresh(self):
         self.fill(self.events,self.db.rows('SELECT e.*,p.name,emp.name AS employee_name FROM events e JOIN products p ON p.barcode=e.barcode LEFT JOIN employees emp ON emp.id=e.employee WHERE e.deleted IS NULL ORDER BY e.created DESC LIMIT 500'), [('id','ID'),('created','UTC'),('kind','Операция'),('name','Товар'),('quantity','Кол-во'),('location','Место'),('employee_name','Сотрудник'),('status','Статус')])
@@ -487,15 +574,25 @@ class Window(QMainWindow):
         products=self.db.rows('SELECT * FROM products ORDER BY name')
         self.fill(self.products_table,products,[('barcode','Штрихкод'),('name','Товар')])
         old=self.training_product.currentData(); self.training_product.clear()
-        for p in products: self.training_product.addItem(f"{p['name']} / {p['barcode']}",p['barcode'])
+        for p in products: self.training_product.addItem(p['name'],p['barcode'])
         index=self.training_product.findData(old)
         if index>=0: self.training_product.setCurrentIndex(index)
+        selected=self.product_picker.currentData(); self.product_picker.clear(); self.product_picker.addItem('Выберите товар',None)
+        for p in products: self.product_picker.addItem(p['name'],p['barcode'])
+        index=self.product_picker.findData(selected)
+        if index>=0: self.product_picker.setCurrentIndex(index)
         summary=self.db.rows('SELECT p.name,COUNT(*) AS n,COUNT(DISTINCT l.session) AS sessions FROM labels l JOIN products p ON p.barcode=l.barcode GROUP BY l.barcode ORDER BY p.name')
         self.photo_summary.setText('Примеры: '+('; '.join(f"{r['name']}: {r['n']} фото, съёмок {r['sessions']}" for r in summary) or 'пока нет фотографий'))
         from .train import training_guidance
         self.training_hint.setText(training_guidance(self.db.rows('SELECT * FROM labels')) or 'Данные собраны. Перед запуском будут проверены разделение съёмок и дубликаты.')
         count=len(list((self.root/'models').glob('*.pt')))
         self.models_note.setText(f'Папка моделей: {self.root / "models"}\nСохранено моделей: {count}. Файл .pt появляется только после успешного обучения; импорт фото сохраняет примеры, а не модель.')
+        values={'products':len(products),'pending':self.db.rows("SELECT COUNT(*) AS n FROM events WHERE deleted IS NULL AND status='pending'")[0]['n'],'stock':self.db.rows('SELECT COALESCE(SUM(quantity),0) AS n FROM stock')[0]['n'],'photos':sum(r['n'] for r in summary)}
+        for key,value in values.items(): self.metric_labels[key].setText(str(value))
+        active=(self.root/'models'/'active.json').exists()
+        self.dashboard_health.setText(f'Модель: {"активирована" if active else "нужно обучить и активировать"}\nСотрудников: {self.employee.count()-1}\nФотографии: {values["photos"]}\n\nУчёт изменяется после подтверждения оператора.\nИнтернет-фото подходят для первого знакомства модели; проверяйте её на реальном складе.')
+        self.fill(self.recent_events,self.db.rows('SELECT e.kind,e.status,e.quantity,p.name FROM events e JOIN products p ON p.barcode=e.barcode WHERE e.deleted IS NULL ORDER BY e.created DESC LIMIT 8'),[('name','Товар'),('kind','Действие'),('quantity','Количество'),('status','Статус')])
+        self.filter_catalog(); self.filter_events()
 
     def save_label(self):
         code=self.barcode.text().strip()
@@ -544,7 +641,12 @@ class Window(QMainWindow):
         metrics=Path(path).with_suffix('.json')
         if not metrics.exists(): raise ValueError('Нет отчёта проверки рядом с моделью')
         report=json.loads(metrics.read_text(encoding='utf-8'))
-        if QMessageBox.question(self,'Активация модели',json.dumps(report,ensure_ascii=False,indent=2)+'\nИспользовать для подсказок оператору?')!=QMessageBox.Yes: return
+        accuracy=report.get('accuracy')
+        summary=(f'Модель: {Path(path).name}\nТоваров: {len(report.get("classes",[]))}\n'
+                 f'Учебных фото: {report.get("train_samples",0)}\nПроверочных фото: {report.get("validation_samples",0)}\n'
+                 f'Результат проверки: {format(accuracy,".1%") if accuracy is not None else "независимая проверка не проводилась"}\n')
+        if report.get('kind')=='catalog_pilot_unvalidated': summary+='\nКаталожный эксперимент: по одному интернет-фото на товар. Нужна проверка на ваших предметах.\n'
+        if QMessageBox.question(self,'Включить модель?',summary+'\nИспользовать для подсказок оператору?')!=QMessageBox.Yes: return
         self.live_recognition.setChecked(False); self.stop_recognition()
         (self.root/'models'/'active.json').write_text(json.dumps({'path':path,'report':report},ensure_ascii=False),encoding='utf-8')
         self.predictor=None; self.train_log.append('Модель активирована для подсказок; автоматический учёт выключен.')
@@ -655,7 +757,7 @@ class Window(QMainWindow):
 
 
 def main():
-    app=QApplication(sys.argv); app.setStyle('Fusion'); app.setStyleSheet(STYLE)
+    app=QApplication(sys.argv); app.setStyle('Fusion')
     window=Window(); window.show()
     if '--smoke-test' in sys.argv:
         QTimer.singleShot(800,lambda:window.grab().save(str(window.root/'client-preview.png')))
