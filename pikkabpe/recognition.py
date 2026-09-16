@@ -24,14 +24,18 @@ class Recognition(QObject):
         self.process=None; self.ready=False; self.pending=None; self.sequence=0
         self.buffer=b''; self.errors=''; self.deadline=0
         self.engine='classifier'
+        self.decode_barcodes=False
         self.watch=QTimer(self); self.watch.setInterval(1000); self.watch.timeout.connect(self.check_timeout); self.watch.start()
 
-    def start(self,python,model):
+    def start(self,python,model=None,warehouse=None,decode=False):
         self.stop()
-        if not Path(model).is_file(): raise ValueError('Файл активной модели не найден. Активируйте модель заново.')
+        for path in (model,warehouse):
+            if path and not Path(path).is_file(): raise ValueError('Файл модели не найден. Выберите модель заново.')
+        self.decode_barcodes=decode
         self.process=QProcess(self); p=self.process
         env=QProcessEnvironment.systemEnvironment(); env.insert('PYTHONIOENCODING','utf-8')
-        config=Path(model).resolve().parent/'yolo-config'; config.mkdir(exist_ok=True); env.insert('YOLO_CONFIG_DIR',str(config))
+        from .paths import data_root
+        config=data_root()/'yolo-config'; config.mkdir(exist_ok=True); env.insert('YOLO_CONFIG_DIR',str(config))
         if getattr(sys,'frozen',False):
             runtime=Path(sys._MEIPASS)/'inference-runtime'
             env.insert('PYTHONPATH',str(runtime)); p.setWorkingDirectory(str(runtime))
@@ -41,7 +45,11 @@ class Recognition(QObject):
         p.errorOccurred.connect(lambda e:self.failed('Не удалось запустить распознавание: '+p.errorString()))
         p.finished.connect(lambda code:self.failed('Процесс распознавания завершён. '+self.errors[-600:]))
         self.deadline=time.monotonic()+90
-        p.start(python,['-u','-m','pikkabpe.train','--serve','--model',str(model)])
+        args=['-u','-m','pikkabpe.train','--serve']
+        if model: args+=['--model',str(model)]
+        if warehouse: args+=['--warehouse-model',str(warehouse)]
+        if decode: args+=['--decode-barcodes']
+        p.start(python,args)
         self.message.emit('Загружается модель…')
 
     def read_errors(self,p):
@@ -73,9 +81,9 @@ class Recognition(QObject):
         x,y,w,h=roi; height,width=frame.shape[:2]
         crop=frame[max(0,int(y*height)):min(height,int((y+h)*height)),max(0,int(x*width)):min(width,int((x+w)*width))]
         if not crop.size: return False
-        scale=min(1,640/max(crop.shape[:2]))
+        scale=1 if self.decode_barcodes else min(1,1280/max(crop.shape[:2]))
         if scale<1: crop=cv2.resize(crop,None,fx=scale,fy=scale)
-        ok,encoded=cv2.imencode('.jpg',crop,[cv2.IMWRITE_JPEG_QUALITY,90])
+        ok,encoded=cv2.imencode('.png',crop) if self.decode_barcodes else cv2.imencode('.jpg',crop,[cv2.IMWRITE_JPEG_QUALITY,90])
         if not ok: return False
         self.sequence+=1
         self.pending={'id':self.sequence,'roi':roi,'generation':generation,'manual':manual,'submitted':time.monotonic()}

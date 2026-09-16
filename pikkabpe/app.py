@@ -166,6 +166,7 @@ class Window(QMainWindow):
         self.recognition_generation=0; self.manual_request=None; self.last_inferred_frame=-1
         self.last_inference=0; self.result_until=0; self.inference_roi=None
         self.annotation_frame=None; self.annotation_boxes=[]
+        self.preannotation_pending=False; self.proposals=[]
         self.setWindowTitle(f'pikkāBPE / операторская станция {__version__}')
         self.logo_path=Path(__file__).parent/'assets'/'logo.svg'
         self.setWindowIcon(QIcon(str(self.logo_path)))
@@ -257,9 +258,14 @@ class Window(QMainWindow):
         self.motion_note=QLabel('Движение создаёт подсказку. Остатки меняются после подтверждения.'); self.motion_note.setWordWrap(True); left.addWidget(self.motion_note)
         self.live_recognition=QCheckBox('Распознавать предмет на видео'); left.addWidget(self.live_recognition)
         self.live_recognition.toggled.connect(lambda checked:self.guard(lambda:self.toggle_recognition(checked)))
+        modules=QHBoxLayout(); left.addLayout(modules)
+        self.use_products=QCheckBox('Товары ИНТЭР'); self.use_products.setChecked(self.preferences.get('use_products',True)); modules.addWidget(self.use_products)
+        self.use_warehouse=QCheckBox('Общий обзор склада'); self.use_warehouse.setChecked(self.preferences.get('use_warehouse',False)); modules.addWidget(self.use_warehouse)
+        self.read_codes=QCheckBox('Читать штрихкоды'); self.read_codes.setChecked(self.preferences.get('read_codes',False)); modules.addWidget(self.read_codes)
+        for toggle in (self.use_products,self.use_warehouse,self.read_codes): toggle.toggled.connect(self.vision_settings_changed)
         options=QHBoxLayout(); left.addLayout(options)
         options.addWidget(QLabel('Порог оценки модели'))
-        self.recognition_threshold=QDoubleSpinBox(); self.recognition_threshold.setRange(.0,1.0); self.recognition_threshold.setSingleStep(.05); self.recognition_threshold.setValue(.7); options.addWidget(self.recognition_threshold)
+        self.recognition_threshold=QDoubleSpinBox(); self.recognition_threshold.setRange(.01,1.0); self.recognition_threshold.setSingleStep(.05); self.recognition_threshold.setValue(.35); options.addWidget(self.recognition_threshold)
         options.addWidget(self.button('Весь кадр',lambda:setattr(self.video,'roi',None)))
         self.recognition_note=QLabel('YOLO находит предметы во всём кадре. Для старого классификатора выделите область мышью.'); self.recognition_note.setWordWrap(True); left.addWidget(self.recognition_note)
         annotate=QHBoxLayout(); left.addLayout(annotate)
@@ -273,6 +279,8 @@ class Window(QMainWindow):
         self.barcode.returnPressed.connect(self.lookup)
         self.product_name=QLabel('Введите код товара'); self.product_name.setWordWrap(True); form.addRow('',self.product_name)
         panel.addWidget(self.button('Найти / добавить товар',self.lookup))
+        self.decoded_codes=QComboBox(); self.decoded_codes.addItem('Прочитанные коды появятся здесь',None); form.addRow('Коды с камеры',self.decoded_codes)
+        panel.addWidget(self.button('Выбрать прочитанный код',self.use_decoded_code))
         self.employee=QComboBox(); form.addRow('Сотрудник',self.employee)
         self.location=QComboBox(); form.addRow('Размещение',self.location)
         self.kind=QComboBox()
@@ -308,7 +316,8 @@ class Window(QMainWindow):
         self.receipts=QTableWidget(); lower.addWidget(self.receipts)
 
     def build_training(self):
-        page=QWidget(); self.tabs.addTab(page,'Обучение'); box=QVBoxLayout(page)
+        page=QScrollArea(); page.setWidgetResizable(True); self.tabs.addTab(page,'Обучение')
+        content=QWidget(); page.setWidget(content); box=QVBoxLayout(content)
         note=QLabel('Научите камеру узнавать ваши товары. Добавляйте крупные снимки одного предмета с разных ракурсов.'); note.setWordWrap(True); note.setObjectName('muted'); box.addWidget(note)
         step=self.card('01  ·  Выберите товар и добавьте фотографии',box)
         form=QFormLayout(); step.addLayout(form)
@@ -325,14 +334,26 @@ class Window(QMainWindow):
         advanced=QWidget(); advanced_form=QFormLayout(advanced); advanced_form.setContentsMargins(0,0,0,0)
         show_advanced=QCheckBox('Параметры обучения'); second.addWidget(show_advanced); second.addWidget(advanced); advanced.hide(); show_advanced.toggled.connect(advanced.setVisible)
         self.epochs=QSpinBox(); self.epochs.setRange(1,100); self.epochs.setValue(10); advanced_form.addRow('Проходов по данным',self.epochs)
-        local_python=Path('D:/pikkaBPE/.venv/Scripts/python.exe')
-        self.train_python=QLineEdit(str(Path(sys.executable)) if not getattr(sys,'frozen',False) else (str(local_python) if local_python.exists() else '')); advanced_form.addRow('Python для NVIDIA',self.train_python)
+        python_candidates=[self.root.parent/'.venv/Scripts/python.exe',Path(sys.executable).resolve().parents[2]/'.venv/Scripts/python.exe',Path('D:/pikkaBPE/.venv/Scripts/python.exe')]
+        default_python=str(Path(sys.executable)) if not getattr(sys,'frozen',False) else next((str(p) for p in python_candidates if p.is_file()),'')
+        self.train_python=QLineEdit(self.preferences.get('train_python',default_python)); advanced_form.addRow('Python для NVIDIA',self.train_python)
+        self.train_python.editingFinished.connect(self.save_vision_settings)
+        second.addWidget(QLabel('Исходная или ранее обученная модель'))
+        self.training_weights=QLineEdit(self.preferences.get('training_weights','')); self.training_weights.setPlaceholderText('По умолчанию: готовая YOLOv8n')
+        weights_row=QHBoxLayout(); weights_row.addWidget(self.training_weights); weights_row.addWidget(self.button('Выбрать веса',self.choose_training_weights)); second.addLayout(weights_row)
+        self.training_weights.editingFinished.connect(self.save_vision_settings)
         crop=QHBoxLayout(); step.addLayout(crop); crop.addWidget(self.button('Открыть фото для выделения',self.import_image)); crop.addWidget(self.button('Пример для классификатора',self.save_label))
         annotation_note=QLabel('Для YOLO: откройте фото → выделите предмет → добавьте рамку. Разметьте все известные предметы в кадре, затем сохраните кадр. Для следующего предмета выберите его название и новую рамку.'); annotation_note.setWordWrap(True); step.addWidget(annotation_note)
         annotation=QHBoxLayout(); step.addLayout(annotation)
         annotation.addWidget(self.button('Добавить рамку YOLO',self.add_yolo_box))
         annotation.addWidget(self.button('Сохранить кадр YOLO',self.save_yolo_frame))
         annotation.addWidget(self.button('Очистить рамки',self.clear_yolo_boxes))
+        annotation.addWidget(self.button('Убрать последнюю рамку',self.undo_yolo_box))
+        step.addWidget(self.button('Предложить рамки моделью',self.preannotate))
+        self.proposals_table=QTableWidget(); self.proposals_table.setSelectionBehavior(QTableWidget.SelectRows); self.proposals_table.setMaximumHeight(150); step.addWidget(self.proposals_table)
+        self.proposals_table.itemSelectionChanged.connect(self.select_proposal)
+        proposal_note=QLabel('Выберите предложение, проверьте товар выше и рамку на изображении. При необходимости обведите предмет заново. Принимайте только проверенные рамки; перед сохранением разметьте все товары.'); proposal_note.setWordWrap(True); step.addWidget(proposal_note)
+        step.addWidget(self.button('Принять выбранную рамку для товара',self.accept_proposal))
         row=QHBoxLayout(); second.addLayout(row)
         row.addWidget(self.button('Обучить на NVIDIA',self.train,True))
         row.addWidget(self.button('Остановить обучение',self.stop_training))
@@ -342,11 +363,86 @@ class Window(QMainWindow):
         row.addWidget(self.button('Активировать модель',self.promote))
         row.addWidget(self.button('Распознать выделенный предмет',self.predict))
         row.addWidget(self.button('Папка моделей',lambda:os.startfile(self.root/'models')))
+        general=self.card('Общий обзор склада',box)
+        self.warehouse_path=QLineEdit(self.preferences.get('warehouse_path','')); self.warehouse_path.setReadOnly(True); general.addWidget(self.warehouse_path)
+        buttons=QHBoxLayout(); general.addLayout(buttons)
+        buttons.addWidget(self.button('Загрузить WarehouseLogistics',self.download_warehouse))
+        buttons.addWidget(self.button('Выбрать скачанную модель',self.choose_warehouse))
+        self.warehouse_note=QLabel('Общие классы: люди, коробки, паллеты. Качество на вашем складе ещё нужно проверить.'); self.warehouse_note.setWordWrap(True); general.addWidget(self.warehouse_note)
         self.train_log=QTextEdit(); self.train_log.setReadOnly(True); box.addWidget(self.train_log)
         self.training_engine.currentIndexChanged.connect(self.refresh)
 
     def clear_yolo_boxes(self):
         self.annotation_frame=None; self.annotation_boxes=[]; self.video.annotation_boxes=[]; self.video.update()
+        self.preannotation_pending=False; self.proposals=[]
+        if hasattr(self,'proposals_table'): self.proposals_table.setRowCount(0)
+
+    def undo_yolo_box(self):
+        if self.annotation_boxes: self.annotation_boxes.pop()
+        if self.video.annotation_boxes: self.video.annotation_boxes.pop()
+        self.video.update()
+
+    def preannotate(self):
+        if self.video.frame is None: raise ValueError('Откройте фото или видео')
+        if self.annotation_boxes: raise ValueError('Сначала сохраните или очистите текущие рамки')
+        active_path=self.root/'models'/'active.json'
+        active=json.loads(active_path.read_text(encoding='utf-8')) if self.use_products.isChecked() and active_path.exists() else {}
+        if not self.use_warehouse.isChecked() and active.get('report',{}).get('engine') not in ('yolo','warehouse_onnx'):
+            raise ValueError('Для предразметки включите общий обзор или активируйте детектор YOLO')
+        self.stop_capture(); self.clear_yolo_boxes()
+        self.annotation_frame=self.video.frame.copy()
+        self.ensure_recognition()
+        self.preannotation_pending=True
+        self.manual_request=(self.annotation_frame.copy(),(0,0,1,1))
+        self.train_log.append('Модель предложит рамки. Выберите товар и подтвердите каждую нужную рамку.')
+
+    def select_proposal(self):
+        index=self.proposals_table.currentRow()
+        if not 0<=index<len(self.proposals): return
+        proposal=self.proposals[index]; x1,y1,x2,y2=proposal['xyxy']
+        self.video.roi=(x1,y1,x2-x1,y2-y1); self.video.update()
+        product_index=self.training_product.findData(proposal.get('barcode')) if proposal.get('kind')=='product' else -1
+        self.training_product.setCurrentIndex(product_index)
+
+    def accept_proposal(self):
+        index=self.proposals_table.currentRow()
+        if not 0<=index<len(self.proposals): raise ValueError('Выберите предложенную рамку')
+        self.add_yolo_box()
+        self.proposals.pop(index); self.proposals_table.removeRow(index)
+
+    def save_vision_settings(self):
+        self.preferences.update(use_products=self.use_products.isChecked(),use_warehouse=self.use_warehouse.isChecked(),read_codes=self.read_codes.isChecked(),
+                                warehouse_path=self.warehouse_path.text(),training_weights=self.training_weights.text(),train_python=self.train_python.text())
+        self.save_preferences()
+
+    def vision_settings_changed(self):
+        self.live_recognition.setChecked(False); self.stop_recognition(); self.save_vision_settings()
+
+    def choose_training_weights(self):
+        path,_=QFileDialog.getOpenFileName(self,'Исходная или ранее обученная YOLO',str(self.root/'models'),'Checkpoint YOLO (*.pt)')
+        if path: self.training_weights.setText(path); self.save_vision_settings()
+
+    def download_warehouse(self):
+        from .model_sources import fetch_warehouse
+        self.warehouse_note.setText('Загружается модель общего обзора…')
+        self.background(lambda:fetch_warehouse(self.root),self.warehouse_downloaded)
+
+    def warehouse_downloaded(self,path):
+        self.live_recognition.setChecked(False); self.stop_recognition()
+        self.warehouse_path.setText(str(path)); self.save_vision_settings()
+        self.warehouse_note.setText('Модель загружена. В «Наблюдении» включите «Общий обзор склада».')
+
+    def choose_warehouse(self):
+        path,_=QFileDialog.getOpenFileName(self,'WarehouseLogistics',str(self.root/'models'),'Warehouse ONNX (*.onnx)')
+        if not path: return
+        report=json.loads(Path(path).with_suffix('.json').read_text(encoding='utf-8'))
+        if report.get('engine')!='warehouse_onnx': raise ValueError('Выберите модель с отчётом загрузчика WarehouseLogistics')
+        self.vision_settings_changed(); self.warehouse_downloaded(path)
+
+    def use_decoded_code(self):
+        code=self.decoded_codes.currentData()
+        if code is None: raise ValueError('Сначала прочитайте код с камеры')
+        self.barcode.setText(code); self.lookup()
 
     def add_yolo_box(self):
         import numpy as np
@@ -357,7 +453,8 @@ class Window(QMainWindow):
         if self.annotation_frame is None: self.annotation_frame=self.video.frame.copy()
         if not np.array_equal(self.annotation_frame,self.video.frame): raise ValueError('Кадр изменился. Сохраните старую разметку или очистите рамки')
         box={'barcode':code,'xywh':list(self.video.roi)}
-        if box not in self.annotation_boxes: self.annotation_boxes.append(box)
+        if box in self.annotation_boxes: return
+        self.annotation_boxes.append(box)
         x,y,w,h=self.video.roi
         self.video.annotation_boxes.append({'xyxy':[x,y,x+w,y+h],'text':self.training_product.currentText()})
         self.video.update(); self.train_log.append(f'Рамок в кадре: {len(self.annotation_boxes)}. Когда всё размечено, сохраните кадр YOLO.')
@@ -690,8 +787,14 @@ class Window(QMainWindow):
         self.training.finished.connect(self.training_finished)
         args=['-u','-m','pikkabpe.train','--data',str(self.root),'--epochs',str(self.epochs.value())]
         if yolo:
-            weights=self.root/'models'/'yolov8n.pt'
-            args+=['--yolo','--weights',str(weights) if weights.exists() else 'yolov8n.pt']
+            weights=self.training_weights.text().strip()
+            if weights:
+                if not Path(weights).is_file() or Path(weights).suffix.lower()!='.pt': raise ValueError('Выберите существующий checkpoint YOLO .pt для дообучения')
+            else:
+                base=self.root/'models'/'yolov8n.pt'
+                weights=str(base) if base.exists() else 'yolov8n.pt'
+            args+=['--yolo','--weights',weights]
+            self.train_log.append('Исходные веса: '+weights)
         self.training.start(self.train_python.text(),args)
 
     def training_finished(self,code):
@@ -708,11 +811,13 @@ class Window(QMainWindow):
         if not metrics.exists(): raise ValueError('Нет отчёта проверки рядом с моделью')
         report=json.loads(metrics.read_text(encoding='utf-8'))
         accuracy=report.get('accuracy')
+        metrics_summary='; '.join(f'{k}: {v:.3f}' for k,v in (report.get('detection_metrics') or {}).items())
         summary=(f'Модель: {Path(path).name}\nТоваров: {len(report.get("classes",[]))}\n'
                  f'Учебных фото: {report.get("train_samples",0)}\nПроверочных фото: {report.get("validation_samples",0)}\n'
                  f'Результат проверки: {format(accuracy,".1%") if accuracy is not None else "независимая проверка не проводилась"}\n')
         if report.get('kind')=='catalog_pilot_unvalidated' or report.get('unvalidated'): summary+='\nКаталожный эксперимент: независимой проверки нет. Нужна проверка на ваших предметах.\n'
         if report.get('engine')=='yolo': summary+='\nYOLO: автоматический поиск предметов и рамки.\n'
+        if metrics_summary: summary+='\nМетрики детектора: '+metrics_summary+'\n'
         if report.get('generic'): summary+='Базовые классы COCO; артикулы склада не распознаёт.\n'
         if QMessageBox.question(self,'Включить модель?',summary+'\nИспользовать для подсказок оператору?')!=QMessageBox.Yes: return
         self.live_recognition.setChecked(False); self.stop_recognition()
@@ -728,10 +833,14 @@ class Window(QMainWindow):
     def ensure_recognition(self):
         if self.recognition.process is not None: return
         path=self.root/'models'/'active.json'
-        if not path.exists(): raise ValueError('Сначала обучите и активируйте модель на вкладке «Обучение»')
-        active=json.loads(path.read_text(encoding='utf-8'))
-        if active.get('report',{}).get('engine')=='yolo': self.recognition_threshold.setValue(.35)
-        self.recognition.start(self.train_python.text(),active['path'])
+        active=json.loads(path.read_text(encoding='utf-8')) if self.use_products.isChecked() and path.exists() else {}
+        warehouse=self.warehouse_path.text().strip() if self.use_warehouse.isChecked() else None
+        decode=self.read_codes.isChecked()
+        if self.use_warehouse.isChecked() and not warehouse: raise ValueError('Загрузите модель общего обзора на странице обучения')
+        if not active and not warehouse and not decode: raise ValueError('Активируйте модель товаров, подключите общий обзор или включите чтение штрихкодов')
+        if active and active.get('report',{}).get('engine') not in ('yolo','warehouse_onnx') and (warehouse or decode):
+            raise ValueError('Выключите «Товары ИНТЭР» для общего обзора со старым классификатором или активируйте YOLO')
+        self.recognition.start(self.train_python.text(),active.get('path'),warehouse,decode)
 
     def toggle_recognition(self,checked):
         if not checked: self.stop_recognition(); return
@@ -742,6 +851,8 @@ class Window(QMainWindow):
 
     def stop_recognition(self):
         self.recognition_generation+=1; self.manual_request=None; self.recognition.stop()
+        self.preannotation_pending=False
+        self.decoded_codes.clear(); self.decoded_codes.addItem('Прочитанные коды появятся здесь',None)
         self.video.recognition_text=''; self.video.recognition_roi=None; self.video.detections=[]; self.video.update()
         self.last_inferred_frame=-1; self.inference_roi=None
 
@@ -750,6 +861,7 @@ class Window(QMainWindow):
         if self.recognition.process is None:
             self.live_recognition.blockSignals(True); self.live_recognition.setChecked(False); self.live_recognition.blockSignals(False)
             self.manual_request=None; self.video.recognition_text=''; self.video.detections=[]; self.video.update(); self.train_log.append(text)
+            self.preannotation_pending=False; self.decoded_codes.clear(); self.decoded_codes.addItem('Распознавание остановлено',None)
 
     def pump_recognition(self):
         now=time.monotonic()
@@ -759,6 +871,7 @@ class Window(QMainWindow):
             self.video.recognition_text=''; self.video.detections=[]; self.video.update(); self.last_inferred_frame=-1
         if self.result_until and now>self.result_until:
             self.video.recognition_text=''; self.video.detections=[]; self.result_until=0; self.video.update()
+            self.decoded_codes.clear(); self.decoded_codes.addItem('Кадр устарел — прочитайте код заново',None)
         if not self.recognition.ready or self.recognition.pending: return
         if self.manual_request:
             frame,area=self.manual_request
@@ -772,17 +885,31 @@ class Window(QMainWindow):
         if result['generation']!=self.recognition_generation: return
         if 'detections' not in result and result['roi']!=(self.video.roi or (0,0,1,1)): return
         if result.get('error'):
+            self.preannotation_pending=False
             self.recognition_note.setText('Ошибка распознавания: '+result['error']); return
         if not result['manual'] and time.monotonic()-result['submitted']>2: return
         from .recognition import describe
         if 'detections' in result:
+            if self.preannotation_pending and result['manual']:
+                self.preannotation_pending=False
+                self.proposals=list(result['detections'])
+                self.fill(self.proposals_table,[{'label':d.get('label',d.get('barcode','')),'score':f'{d["score"]:.0%}'} for d in self.proposals],[('label','Предложение модели'),('score','Оценка')])
+                self.train_log.append(f'Предложений: {len(self.proposals)}. Данные ещё не сохранены; проверьте рамки и назначьте товары.')
             self.video.detections=[]
             for detection in result['detections']:
                 if detection['score']<self.recognition_threshold.value(): continue
-                rows=self.db.rows('SELECT name FROM products WHERE barcode=?',(detection['barcode'],))
-                name=rows[0]['name'] if rows else 'Общий класс: '+detection['barcode']
+                rows=self.db.rows('SELECT name FROM products WHERE barcode=?',(detection['barcode'],)) if detection.get('kind')!='general' else []
+                name=rows[0]['name'] if rows else 'Общий класс: '+detection.get('label',detection['barcode'])
                 self.video.detections.append({'xyxy':detection['xyxy'],'text':f'{name} · {detection["score"]:.0%}'})
-            self.video.recognition_text=f'YOLO · найдено предметов: {len(self.video.detections)}'; self.video.recognition_roi=None
+            previous=self.decoded_codes.currentData(); self.decoded_codes.clear()
+            for code in result.get('barcodes',[]):
+                rows=self.db.rows('SELECT name FROM products WHERE barcode=?',(code['text'],))
+                title=rows[0]['name'] if rows else 'Нет в каталоге'
+                self.video.detections.append({'xyxy':code['xyxy'],'text':f'{code["format"]}: {code["text"]} · {title}'})
+                if self.decoded_codes.findData(code['text'])<0: self.decoded_codes.addItem(f'{code["text"]} · {title}',code['text'])
+            if not self.decoded_codes.count(): self.decoded_codes.addItem('Коды не прочитаны',None)
+            elif self.decoded_codes.findData(previous)>=0: self.decoded_codes.setCurrentIndex(self.decoded_codes.findData(previous))
+            self.video.recognition_text=f'Объектов: {len(result["detections"])} · прочитано кодов: {len(result.get("barcodes",[]))}'; self.video.recognition_roi=None
             self.result_until=time.monotonic()+(10 if result['manual'] else 2); self.video.update()
             self.recognition_note.setText(self.video.recognition_text)
             if result['manual']: self.train_log.append('\n'.join(d['text'] for d in self.video.detections) or 'YOLO: предметы не найдены')
