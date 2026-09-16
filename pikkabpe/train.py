@@ -124,16 +124,26 @@ class Predictor:
 
 def serve(model):
     import sys, base64, io
+    from contextlib import redirect_stdout
     from PIL import Image
-    predictor=Predictor(model)
-    print(json.dumps({'ready':True,'device':predictor.device}),flush=True)
+    metadata=Path(model).with_suffix('.json')
+    report=json.loads(metadata.read_text(encoding='utf-8')) if metadata.exists() else {}
+    yolo=report.get('engine')=='yolo'
+    with redirect_stdout(sys.stderr):
+        if yolo:
+            from .yolo_backend import YoloPredictor
+            predictor=YoloPredictor(model)
+        else: predictor=Predictor(model)
+    print(json.dumps({'ready':True,'device':predictor.device,'engine':'yolo' if yolo else 'classifier'}),flush=True)
     for line in sys.stdin:
         request={}
         try:
             request=json.loads(line)
             with Image.open(io.BytesIO(base64.b64decode(request['image'],validate=True))) as image:
-                code,score=predictor.predict_image(image)
-            result={'id':request['id'],'barcode':code,'score':score}
+                with redirect_stdout(sys.stderr):
+                    if yolo: detections=predictor.predict_image(image,request.get('confidence',.35))
+                    else: code,score=predictor.predict_image(image)
+            result={'id':request['id'],'detections':detections} if yolo else {'id':request['id'],'barcode':code,'score':score}
         except Exception as exc:
             result={'id':request.get('id'),'error':str(exc)}
         print(json.dumps(result,ensure_ascii=False),flush=True)
@@ -144,6 +154,7 @@ if __name__=='__main__':
     parser.add_argument('--predict'); parser.add_argument('--model')
     parser.add_argument('--serve',action='store_true')
     parser.add_argument('--catalog-pilot',action='store_true',help='Explicit unvalidated catalog experiment; never used by normal UI training')
+    parser.add_argument('--yolo',action='store_true'); parser.add_argument('--weights',default='yolov8n.pt')
     args=parser.parse_args()
     if args.serve:
         if not args.model: parser.error('--model is required')
@@ -151,5 +162,9 @@ if __name__=='__main__':
     elif args.predict:
         if not args.model: parser.error('--model is required for prediction')
         code,score=Predictor(args.model).predict(args.predict); print(f'{code}: {score:.1%}')
-    elif args.data: train_model(args.data,args.epochs,catalog_pilot=args.catalog_pilot)
+    elif args.data:
+        if args.yolo:
+            from .yolo_backend import train_yolo
+            train_yolo(args.data,args.epochs,args.weights,pilot=args.catalog_pilot)
+        else: train_model(args.data,args.epochs,catalog_pilot=args.catalog_pilot)
     else: parser.error('--data is required for training')

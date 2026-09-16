@@ -1,0 +1,7 @@
+# Install after the CUDA environment from scripts/setup.ps1.
+ultralytics==8.3.203
+torch==2.5.1+cu118
+torchvision==0.20.1+cu118
+numpy==2.1.3
+opencv-python==4.11.0.86
+Pillow==11.3.0

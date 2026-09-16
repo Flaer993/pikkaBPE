@@ -1,0 +1,28 @@
+{
+  "kind": "yolo_detector",
+  "engine": "yolo",
+  "architecture": "YOLOv8n",
+  "classes": [
+    "IE2357AD92C790388B",
+    "IE364736906C980DC2",
+    "IE3B868912EF45218A",
+    "IE4D3AC8792EA959CD",
+    "IE5D5E1A52B0F2D16B",
+    "IE6EEE949D6A9DB427",
+    "IECB167846980D486F",
+    "IEF55C2F5AB8684852"
+  ],
+  "epochs": 100,
+  "train_samples": 40,
+  "validation_samples": 0,
+  "accuracy": null,
+  "detection_metrics": null,
+  "unvalidated": true,
+  "gpu": "NVIDIA GeForce RTX 3060",
+  "note": "Catalog pilot; no independent validation.",
+  "model_sha256": "e0a88300588ee7408373765f154be4a884f88f9a5694a07ac3a9b0da00992668",
+  "original_images": 8,
+  "synthetic_images": 32,
+  "ultralytics_version": "8.3.203",
+  "validation_note": "No independent validation; synthetic compositions share the original source session."
+}

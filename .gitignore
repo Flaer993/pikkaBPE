@@ -13,6 +13,7 @@ dist/
 *.spec
 .env
 tmp/
+Ultralytics/
 *.db*
 *.mp4
 *.avi

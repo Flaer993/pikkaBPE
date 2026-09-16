@@ -36,6 +36,7 @@ class Video(QLabel):
         self.end = None
         self.recognition_text=''
         self.recognition_roi=None
+        self.detections=[]; self.annotation_boxes=[]
         self.setStyleSheet('background:#101419;border:1px solid #39434e;color:#7f8995;')
 
     def display_rect(self):
@@ -81,7 +82,14 @@ class Video(QLabel):
             painter.drawRect(QRect(view.x()+round(x*view.width()), view.y()+round(y*view.height()), round(w*view.width()), round(h*view.height())))
         if self.start is not None and self.end is not None:
             painter.drawRect(QRect(self.start, self.end).normalized())
-        if self.recognition_text:
+        for detection in self.detections+self.annotation_boxes:
+            x1,y1,x2,y2=detection['xyxy']
+            rectangle=QRect(view.x()+round(x1*view.width()),view.y()+round(y1*view.height()),round((x2-x1)*view.width()),round((y2-y1)*view.height()))
+            painter.setPen(QPen(Qt.green,2)); painter.drawRect(rectangle)
+            caption=detection['text']; label_width=min(view.width(),painter.fontMetrics().horizontalAdvance(caption)+14)
+            label=QRect(min(rectangle.x(),view.right()-label_width),max(view.y(),rectangle.y()-27),label_width,25)
+            painter.fillRect(label,Qt.black); painter.setPen(Qt.white); painter.drawText(label.adjusted(5,0,-5,0),Qt.AlignVCenter,caption)
+        if self.recognition_text and not self.detections:
             if self.recognition_roi and self.recognition_roi!=(0,0,1,1):
                 x,y,w,h=self.recognition_roi
                 painter.setPen(QPen(Qt.green,2)); painter.drawRect(QRect(view.x()+round(x*view.width()),view.y()+round(y*view.height()),round(w*view.width()),round(h*view.height())))
@@ -157,6 +165,7 @@ class Window(QMainWindow):
         self.recognition.message.connect(self.recognition_message)
         self.recognition_generation=0; self.manual_request=None; self.last_inferred_frame=-1
         self.last_inference=0; self.result_until=0; self.inference_roi=None
+        self.annotation_frame=None; self.annotation_boxes=[]
         self.setWindowTitle(f'pikkāBPE / операторская станция {__version__}')
         self.logo_path=Path(__file__).parent/'assets'/'logo.svg'
         self.setWindowIcon(QIcon(str(self.logo_path)))
@@ -252,7 +261,10 @@ class Window(QMainWindow):
         options.addWidget(QLabel('Порог оценки модели'))
         self.recognition_threshold=QDoubleSpinBox(); self.recognition_threshold.setRange(.0,1.0); self.recognition_threshold.setSingleStep(.05); self.recognition_threshold.setValue(.7); options.addWidget(self.recognition_threshold)
         options.addWidget(self.button('Весь кадр',lambda:setattr(self.video,'roi',None)))
-        self.recognition_note=QLabel('Выделите предмет рамкой. Без рамки оценивается весь кадр; это не поиск нескольких объектов.'); self.recognition_note.setWordWrap(True); left.addWidget(self.recognition_note)
+        self.recognition_note=QLabel('YOLO находит предметы во всём кадре. Для старого классификатора выделите область мышью.'); self.recognition_note.setWordWrap(True); left.addWidget(self.recognition_note)
+        annotate=QHBoxLayout(); left.addLayout(annotate)
+        annotate.addWidget(self.button('Добавить рамку YOLO',self.add_yolo_box))
+        annotate.addWidget(self.button('Сохранить разметку кадра',self.save_yolo_frame))
         panel=self.card('',row); form=QFormLayout(); panel.addLayout(form)
         panel.insertWidget(0,QLabel('НОВОЕ СОБЫТИЕ'))
         self.barcode=QLineEdit(); self.barcode.setPlaceholderText('Штрихкод со сканера'); form.addRow('Товар',self.barcode)
@@ -300,6 +312,7 @@ class Window(QMainWindow):
         note=QLabel('Научите камеру узнавать ваши товары. Добавляйте крупные снимки одного предмета с разных ракурсов.'); note.setWordWrap(True); note.setObjectName('muted'); box.addWidget(note)
         step=self.card('01  ·  Выберите товар и добавьте фотографии',box)
         form=QFormLayout(); step.addLayout(form)
+        self.training_engine=QComboBox(); self.training_engine.addItem('YOLO — поиск предметов и рамки','yolo'); self.training_engine.addItem('Классификатор — один выделенный предмет','classifier'); form.addRow('Задача',self.training_engine)
         self.training_product=QComboBox(); form.addRow('Товар на фотографиях',self.training_product)
         photos=QHBoxLayout(); step.addLayout(photos)
         photos.addWidget(self.button('Добавить фотографии товара',self.add_photos,True))
@@ -314,7 +327,12 @@ class Window(QMainWindow):
         self.epochs=QSpinBox(); self.epochs.setRange(1,100); self.epochs.setValue(10); advanced_form.addRow('Проходов по данным',self.epochs)
         local_python=Path('D:/pikkaBPE/.venv/Scripts/python.exe')
         self.train_python=QLineEdit(str(Path(sys.executable)) if not getattr(sys,'frozen',False) else (str(local_python) if local_python.exists() else '')); advanced_form.addRow('Python для NVIDIA',self.train_python)
-        crop=QHBoxLayout(); step.addLayout(crop); crop.addWidget(self.button('Открыть фото для выделения',self.import_image)); crop.addWidget(self.button('Сохранить выделенный пример',self.save_label))
+        crop=QHBoxLayout(); step.addLayout(crop); crop.addWidget(self.button('Открыть фото для выделения',self.import_image)); crop.addWidget(self.button('Пример для классификатора',self.save_label))
+        annotation_note=QLabel('Для YOLO: откройте фото → выделите предмет → добавьте рамку. Разметьте все известные предметы в кадре, затем сохраните кадр. Для следующего предмета выберите его название и новую рамку.'); annotation_note.setWordWrap(True); step.addWidget(annotation_note)
+        annotation=QHBoxLayout(); step.addLayout(annotation)
+        annotation.addWidget(self.button('Добавить рамку YOLO',self.add_yolo_box))
+        annotation.addWidget(self.button('Сохранить кадр YOLO',self.save_yolo_frame))
+        annotation.addWidget(self.button('Очистить рамки',self.clear_yolo_boxes))
         row=QHBoxLayout(); second.addLayout(row)
         row.addWidget(self.button('Обучить на NVIDIA',self.train,True))
         row.addWidget(self.button('Остановить обучение',self.stop_training))
@@ -325,6 +343,30 @@ class Window(QMainWindow):
         row.addWidget(self.button('Распознать выделенный предмет',self.predict))
         row.addWidget(self.button('Папка моделей',lambda:os.startfile(self.root/'models')))
         self.train_log=QTextEdit(); self.train_log.setReadOnly(True); box.addWidget(self.train_log)
+        self.training_engine.currentIndexChanged.connect(self.refresh)
+
+    def clear_yolo_boxes(self):
+        self.annotation_frame=None; self.annotation_boxes=[]; self.video.annotation_boxes=[]; self.video.update()
+
+    def add_yolo_box(self):
+        import numpy as np
+        if self.video.frame is None or not self.video.roi: raise ValueError('Откройте фото или остановите видео, затем выделите предмет мышью')
+        code=self.training_product.currentData()
+        if not code: raise ValueError('Выберите товар для рамки на странице обучения')
+        self.stop_capture()
+        if self.annotation_frame is None: self.annotation_frame=self.video.frame.copy()
+        if not np.array_equal(self.annotation_frame,self.video.frame): raise ValueError('Кадр изменился. Сохраните старую разметку или очистите рамки')
+        box={'barcode':code,'xywh':list(self.video.roi)}
+        if box not in self.annotation_boxes: self.annotation_boxes.append(box)
+        x,y,w,h=self.video.roi
+        self.video.annotation_boxes.append({'xyxy':[x,y,x+w,y+h],'text':self.training_product.currentText()})
+        self.video.update(); self.train_log.append(f'Рамок в кадре: {len(self.annotation_boxes)}. Когда всё размечено, сохраните кадр YOLO.')
+
+    def save_yolo_frame(self):
+        from .yolo_data import save_annotation
+        if self.annotation_frame is None: raise ValueError('Сначала добавьте рамки')
+        save_annotation(self.root,self.annotation_frame,self.annotation_boxes,self.session.text(),self.source.text())
+        self.train_log.append('Кадр с рамками сохранён для обучения YOLO.'); self.clear_yolo_boxes(); self.refresh()
 
     def build_catalogs(self):
         page=QWidget(); self.tabs.addTab(page,'Сотрудники и товары'); box=QVBoxLayout(page)
@@ -417,6 +459,7 @@ class Window(QMainWindow):
 
     def start_capture(self, source):
         self.stop_capture()
+        self.clear_yolo_boxes()
         self.video.roi=None
         self.motion.camera_moved()
         self.capture=Capture(source)
@@ -476,10 +519,14 @@ class Window(QMainWindow):
                 self.status.setText(f'Товар сохранён. {exc}')
             self.refresh()
         self.product_name.setText(rows[0]['name'])
+        index=self.training_product.findData(code)
+        if index>=0: self.training_product.setCurrentIndex(index)
 
     def choose_product(self):
         code=self.product_picker.currentData()
-        if code: self.barcode.setText(code); self.lookup()
+        if code:
+            self.barcode.setText(code); self.lookup()
+            self.training_product.setCurrentIndex(self.training_product.findData(code))
 
     def add_catalog(self,table):
         code,ok=QInputDialog.getText(self,'Справочник','Код:')
@@ -585,6 +632,10 @@ class Window(QMainWindow):
         self.photo_summary.setText('Примеры: '+('; '.join(f"{r['name']}: {r['n']} фото, съёмок {r['sessions']}" for r in summary) or 'пока нет фотографий'))
         from .train import training_guidance
         self.training_hint.setText(training_guidance(self.db.rows('SELECT * FROM labels')) or 'Данные собраны. Перед запуском будут проверены разделение съёмок и дубликаты.')
+        if self.training_engine.currentData()=='yolo':
+            annotations=self.root/'detection'/'annotations.json'
+            records=json.loads(annotations.read_text(encoding='utf-8')) if annotations.exists() else []
+            self.training_hint.setText(f'YOLO: размечено кадров {len(records)}, рамок {sum(len(r["boxes"]) for r in records)}. Для обучения нужны две независимые съёмки каждого товара. Можно начать с одного товара. Обычные фото без рамок используются только классификатором.')
         count=len(list((self.root/'models').glob('*.pt')))
         self.models_note.setText(f'Папка моделей: {self.root / "models"}\nСохранено моделей: {count}. Файл .pt появляется только после успешного обучения; импорт фото сохраняет примеры, а не модель.')
         values={'products':len(products),'pending':self.db.rows("SELECT COUNT(*) AS n FROM events WHERE deleted IS NULL AND status='pending'")[0]['n'],'stock':self.db.rows('SELECT COALESCE(SUM(quantity),0) AS n FROM stock')[0]['n'],'photos':sum(r['n'] for r in summary)}
@@ -609,24 +660,39 @@ class Window(QMainWindow):
             import numpy as np
             frame=cv2.imdecode(np.fromfile(path,dtype=np.uint8),cv2.IMREAD_COLOR)
             if frame is None: raise ValueError('Изображение не прочитано')
-            self.stop_capture(); self.video.frame=frame; self.video.roi=None; self.video.update(); self.tabs.setCurrentIndex(0)
+            self.stop_capture(); self.clear_yolo_boxes(); self.video.frame=frame; self.video.roi=None; self.video.update(); self.tabs.setCurrentIndex(0)
 
     def train(self):
         if self.training and self.training.state()!=QProcess.NotRunning: raise ValueError('Обучение уже запущено')
         from .train import split_sessions, training_guidance
-        rows=self.db.rows('SELECT * FROM labels')
-        guidance=training_guidance(rows)
-        if guidance:
-            self.train_log.append(guidance)
-            raise ValueError(guidance)
-        split_sessions(rows)
+        yolo=self.training_engine.currentData()=='yolo'
+        if yolo:
+            from .yolo_data import split_annotations
+            annotation_file=self.root/'detection'/'annotations.json'
+            if not annotation_file.exists(): raise ValueError('Для YOLO нужны рамки на полных кадрах. Добавьте рамки и сохраните кадры из двух разных съёмок.')
+            split_annotations(json.loads(annotation_file.read_text(encoding='utf-8')))
+        else:
+            rows=self.db.rows('SELECT * FROM labels')
+            guidance=training_guidance(rows)
+            if guidance:
+                self.train_log.append(guidance)
+                raise ValueError(guidance)
+            split_sessions(rows)
         self.training=QProcess(self); self.training.setProcessChannelMode(QProcess.MergedChannels)
         environment=QProcessEnvironment.systemEnvironment(); environment.insert('PYTHONIOENCODING','utf-8')
+        environment.insert('YOLO_CONFIG_DIR',str(self.root/'yolo-config'))
+        (self.root/'yolo-config').mkdir(exist_ok=True)
+        if getattr(sys,'frozen',False):
+            runtime=Path(sys._MEIPASS)/'inference-runtime'; environment.insert('PYTHONPATH',str(runtime)); self.training.setWorkingDirectory(str(runtime))
         self.training.setProcessEnvironment(environment)
         self.training.readyReadStandardOutput.connect(lambda:self.train_log.append(bytes(self.training.readAllStandardOutput()).decode('utf-8',errors='replace')))
         self.training.errorOccurred.connect(lambda e:self.train_log.append('Ошибка запуска: '+self.training.errorString()))
         self.training.finished.connect(self.training_finished)
-        self.training.start(self.train_python.text(),['-u','-m','pikkabpe.train','--data',str(self.root),'--epochs',str(self.epochs.value())])
+        args=['-u','-m','pikkabpe.train','--data',str(self.root),'--epochs',str(self.epochs.value())]
+        if yolo:
+            weights=self.root/'models'/'yolov8n.pt'
+            args+=['--yolo','--weights',str(weights) if weights.exists() else 'yolov8n.pt']
+        self.training.start(self.train_python.text(),args)
 
     def training_finished(self,code):
         self.train_log.append(f'Модель сохранена в {self.root / "models"}. Проверьте отчёт и активируйте модель.' if code==0 else f'Обучение не завершено (код {code}). Модель этого запуска не создана. Причина указана выше в журнале.')
@@ -645,16 +711,18 @@ class Window(QMainWindow):
         summary=(f'Модель: {Path(path).name}\nТоваров: {len(report.get("classes",[]))}\n'
                  f'Учебных фото: {report.get("train_samples",0)}\nПроверочных фото: {report.get("validation_samples",0)}\n'
                  f'Результат проверки: {format(accuracy,".1%") if accuracy is not None else "независимая проверка не проводилась"}\n')
-        if report.get('kind')=='catalog_pilot_unvalidated': summary+='\nКаталожный эксперимент: по одному интернет-фото на товар. Нужна проверка на ваших предметах.\n'
+        if report.get('kind')=='catalog_pilot_unvalidated' or report.get('unvalidated'): summary+='\nКаталожный эксперимент: независимой проверки нет. Нужна проверка на ваших предметах.\n'
+        if report.get('engine')=='yolo': summary+='\nYOLO: автоматический поиск предметов и рамки.\n'
+        if report.get('generic'): summary+='Базовые классы COCO; артикулы склада не распознаёт.\n'
         if QMessageBox.question(self,'Включить модель?',summary+'\nИспользовать для подсказок оператору?')!=QMessageBox.Yes: return
         self.live_recognition.setChecked(False); self.stop_recognition()
         (self.root/'models'/'active.json').write_text(json.dumps({'path':path,'report':report},ensure_ascii=False),encoding='utf-8')
         self.predictor=None; self.train_log.append('Модель активирована для подсказок; автоматический учёт выключен.')
 
     def predict(self):
-        if self.video.frame is None or not self.video.roi: raise ValueError('Откройте фото или видео и выделите предмет рамкой')
+        if self.video.frame is None: raise ValueError('Откройте фото или видео')
         self.ensure_recognition()
-        self.manual_request=(self.video.frame.copy(),self.video.roi)
+        self.manual_request=(self.video.frame.copy(),self.video.roi or (0,0,1,1))
         self.train_log.append('Распознаём выделенный предмет…')
 
     def ensure_recognition(self):
@@ -662,6 +730,7 @@ class Window(QMainWindow):
         path=self.root/'models'/'active.json'
         if not path.exists(): raise ValueError('Сначала обучите и активируйте модель на вкладке «Обучение»')
         active=json.loads(path.read_text(encoding='utf-8'))
+        if active.get('report',{}).get('engine')=='yolo': self.recognition_threshold.setValue(.35)
         self.recognition.start(self.train_python.text(),active['path'])
 
     def toggle_recognition(self,checked):
@@ -673,38 +742,51 @@ class Window(QMainWindow):
 
     def stop_recognition(self):
         self.recognition_generation+=1; self.manual_request=None; self.recognition.stop()
-        self.video.recognition_text=''; self.video.recognition_roi=None; self.video.update()
+        self.video.recognition_text=''; self.video.recognition_roi=None; self.video.detections=[]; self.video.update()
         self.last_inferred_frame=-1; self.inference_roi=None
 
     def recognition_message(self,text):
         self.recognition_note.setText(text)
         if self.recognition.process is None:
             self.live_recognition.blockSignals(True); self.live_recognition.setChecked(False); self.live_recognition.blockSignals(False)
-            self.manual_request=None; self.video.recognition_text=''; self.video.update(); self.train_log.append(text)
+            self.manual_request=None; self.video.recognition_text=''; self.video.detections=[]; self.video.update(); self.train_log.append(text)
 
     def pump_recognition(self):
         now=time.monotonic()
-        roi=self.video.roi or (0,0,1,1)
+        roi=(0,0,1,1) if self.recognition.engine=='yolo' else (self.video.roi or (0,0,1,1))
         if roi!=self.inference_roi:
             self.inference_roi=roi; self.recognition_generation+=1
-            self.video.recognition_text=''; self.video.update(); self.last_inferred_frame=-1
+            self.video.recognition_text=''; self.video.detections=[]; self.video.update(); self.last_inferred_frame=-1
         if self.result_until and now>self.result_until:
-            self.video.recognition_text=''; self.result_until=0; self.video.update()
+            self.video.recognition_text=''; self.video.detections=[]; self.result_until=0; self.video.update()
         if not self.recognition.ready or self.recognition.pending: return
         if self.manual_request:
             frame,area=self.manual_request
-            if self.recognition.submit(frame,area,self.recognition_generation,manual=True): self.manual_request=None
+            if self.recognition.engine=='yolo': area=(0,0,1,1)
+            if self.recognition.submit(frame,area,self.recognition_generation,manual=True,confidence=self.recognition_threshold.value()): self.manual_request=None
         elif self.live_recognition.isChecked() and self.video.frame is not None and self.frame_count!=self.last_inferred_frame and now-self.last_inference>=.4:
-            if self.recognition.submit(self.video.frame,roi,self.recognition_generation):
+            if self.recognition.submit(self.video.frame,roi,self.recognition_generation,confidence=self.recognition_threshold.value()):
                 self.last_inferred_frame=self.frame_count; self.last_inference=now
 
     def recognition_result(self,result):
         if result['generation']!=self.recognition_generation: return
-        if result['roi']!=(self.video.roi or (0,0,1,1)): return
+        if 'detections' not in result and result['roi']!=(self.video.roi or (0,0,1,1)): return
         if result.get('error'):
             self.recognition_note.setText('Ошибка распознавания: '+result['error']); return
         if not result['manual'] and time.monotonic()-result['submitted']>2: return
         from .recognition import describe
+        if 'detections' in result:
+            self.video.detections=[]
+            for detection in result['detections']:
+                if detection['score']<self.recognition_threshold.value(): continue
+                rows=self.db.rows('SELECT name FROM products WHERE barcode=?',(detection['barcode'],))
+                name=rows[0]['name'] if rows else 'Общий класс: '+detection['barcode']
+                self.video.detections.append({'xyxy':detection['xyxy'],'text':f'{name} · {detection["score"]:.0%}'})
+            self.video.recognition_text=f'YOLO · найдено предметов: {len(self.video.detections)}'; self.video.recognition_roi=None
+            self.result_until=time.monotonic()+(10 if result['manual'] else 2); self.video.update()
+            self.recognition_note.setText(self.video.recognition_text)
+            if result['manual']: self.train_log.append('\n'.join(d['text'] for d in self.video.detections) or 'YOLO: предметы не найдены')
+            return
         text=describe(self.db,result['barcode'],result['score'],self.recognition_threshold.value())
         self.video.recognition_text=text; self.video.recognition_roi=result['roi']; self.video.update()
         self.result_until=time.monotonic()+(10 if result['manual'] else 2)

@@ -23,6 +23,7 @@ class Recognition(QObject):
         super().__init__(parent)
         self.process=None; self.ready=False; self.pending=None; self.sequence=0
         self.buffer=b''; self.errors=''; self.deadline=0
+        self.engine='classifier'
         self.watch=QTimer(self); self.watch.setInterval(1000); self.watch.timeout.connect(self.check_timeout); self.watch.start()
 
     def start(self,python,model):
@@ -30,6 +31,7 @@ class Recognition(QObject):
         if not Path(model).is_file(): raise ValueError('Файл активной модели не найден. Активируйте модель заново.')
         self.process=QProcess(self); p=self.process
         env=QProcessEnvironment.systemEnvironment(); env.insert('PYTHONIOENCODING','utf-8')
+        config=Path(model).resolve().parent/'yolo-config'; config.mkdir(exist_ok=True); env.insert('YOLO_CONFIG_DIR',str(config))
         if getattr(sys,'frozen',False):
             runtime=Path(sys._MEIPASS)/'inference-runtime'
             env.insert('PYTHONPATH',str(runtime)); p.setWorkingDirectory(str(runtime))
@@ -60,12 +62,13 @@ class Recognition(QObject):
             except (ValueError,UnicodeDecodeError): continue
             if data.get('ready'):
                 self.ready=True; self.deadline=0
+                self.engine=data.get('engine','classifier')
                 self.message.emit('Модель готова · '+data.get('device',''))
             elif self.pending and data.get('id')==self.pending['id']:
                 context=self.pending; self.pending=None; self.deadline=0
                 self.result.emit({**data,**context})
 
-    def submit(self,frame,roi,generation,manual=False):
+    def submit(self,frame,roi,generation,manual=False,confidence=.35):
         if not self.ready or self.pending: return False
         x,y,w,h=roi; height,width=frame.shape[:2]
         crop=frame[max(0,int(y*height)):min(height,int((y+h)*height)),max(0,int(x*width)):min(width,int((x+w)*width))]
@@ -77,7 +80,7 @@ class Recognition(QObject):
         self.sequence+=1
         self.pending={'id':self.sequence,'roi':roi,'generation':generation,'manual':manual,'submitted':time.monotonic()}
         self.deadline=time.monotonic()+15
-        payload={'id':self.sequence,'image':base64.b64encode(encoded).decode('ascii')}
+        payload={'id':self.sequence,'image':base64.b64encode(encoded).decode('ascii'),'confidence':confidence}
         self.process.write((json.dumps(payload)+'\n').encode('utf-8'))
         return True
 
