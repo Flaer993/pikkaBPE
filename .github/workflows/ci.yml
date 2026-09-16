@@ -70,7 +70,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 -c "import pathlib,re,os; v=re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('pikkabpe/__init__.py').read_text()).group(1); assert os.environ['GITHUB_REF_NAME']=='v'+v, 'Tag/version mismatch'"
-          tar -czf release/pikkaBPE-firmware-source.tar.gz firmware
+          tar -czf release/pikkaBPE-firmware-source.tar.gz firmware scripts/build_firmware.py scripts/fetch_firmware_deps.py docs/board-wiring.md docs/board-source-manifest.json
           tar -czf release/pikkaBPE-CAD-P0.tar.gz cad
           cp output/pdf/pikkaBPE-manual.pdf release/
           gh release create "$GITHUB_REF_NAME" release/* --title "pikkāBPE $GITHUB_REF_NAME" --notes-file docs/release-notes.md
