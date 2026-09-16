@@ -10,9 +10,24 @@ import time
 from .store import Store
 
 
+def training_guidance(rows):
+    classes={r['barcode'] for r in rows}
+    if not rows:
+        return 'Добавьте фотографии минимум двух разных товаров. Для каждого нужны две независимые съёмки: обучение и проверка.'
+    if len(classes)<2:
+        return (f'Добавлено {len(rows)} фото одного товара. Это один класс, независимо от числа снимков. '
+                'Добавьте фотографии второго товара. Затем отдельно снимите оба товара ещё раз, нажмите «Новая съёмка» и добавьте новые фото. '
+                'Пока обучение не запущено, файл модели не создаётся.')
+    missing=[code for code in sorted(classes) if len({r['session'] for r in rows if r['barcode']==code})<2]
+    if missing:
+        return ('Нужна отдельная проверочная съёмка для товаров: '+', '.join(missing)+'. '
+                'Снимите их заново, нажмите «Новая съёмка» и добавьте новые фото. Не загружайте копии прежних снимков.')
+    return ''
+
+
 def split_sessions(rows, seed=42):
     classes=sorted({r['barcode'] for r in rows})
-    if len(classes)<2: raise ValueError('Нужны минимум два класса товаров')
+    if len(classes)<2: raise ValueError(training_guidance(rows))
     sessions=sorted({r['session'] for r in rows})
     if len(sessions)<2: raise ValueError('Нужны минимум две независимые сессии съёмки')
     # Search a group split with every class present on both sides.

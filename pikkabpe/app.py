@@ -8,7 +8,7 @@ from pathlib import Path
 
 import cv2
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRect, QProcess, QProcessEnvironment
-from PySide6.QtGui import QImage, QPixmap, QPainter, QPen
+from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QIcon
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QFormLayout, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTabWidget,
     QTableWidget, QTableWidgetItem, QMessageBox, QFileDialog, QCheckBox, QSplitter, QTextEdit, QInputDialog)
@@ -152,9 +152,13 @@ class Window(QMainWindow):
         self.last_follow = 0
         self.predictor = None
         self.setWindowTitle(f'pikkāBPE / операторская станция {__version__}')
+        self.logo_path=Path(__file__).parent/'assets'/'logo.svg'
+        self.setWindowIcon(QIcon(str(self.logo_path)))
         self.resize(1400, 900)
         base = QWidget(); self.setCentralWidget(base); layout = QVBoxLayout(base)
-        brand = QLabel('pikkāBPE   /   VISION CONTROL'); brand.setObjectName('brand'); layout.addWidget(brand)
+        header=QHBoxLayout(); layout.addLayout(header)
+        logo=QLabel(); logo.setPixmap(QIcon(str(self.logo_path)).pixmap(64,64)); header.addWidget(logo)
+        brand = QLabel('pikkāBPE   /   VISION CONTROL'); brand.setObjectName('brand'); header.addWidget(brand); header.addStretch()
         sub = QLabel('ОДНА ЗОНА   •   ОБУЧЕНИЕ С ОПЕРАТОРОМ   •   ЛОКАЛЬНЫЙ УЧЁТ'); sub.setObjectName('subtitle'); layout.addWidget(sub)
         self.tabs = QTabWidget(); layout.addWidget(self.tabs)
         self.build_camera(); self.build_inventory(); self.build_training(); self.build_updates(); self.build_catalogs()
@@ -227,6 +231,9 @@ class Window(QMainWindow):
         photos.addWidget(self.button('Добавить фотографии товара',self.add_photos,True))
         photos.addWidget(self.button('Новая съёмка',lambda:self.session.setText(time.strftime('%Y-%m-%d-%H%M%S'))))
         self.photo_summary=QLabel(''); self.photo_summary.setWordWrap(True); box.addWidget(self.photo_summary)
+        self.training_hint=QLabel(''); self.training_hint.setWordWrap(True); self.training_hint.setStyleSheet('color:#ffb577;padding:8px;background:#232931;'); box.addWidget(self.training_hint)
+        self.models_note=QLabel(''); self.models_note.setWordWrap(True); box.addWidget(self.models_note)
+        box.addWidget(self.button('Открыть папку моделей',lambda:os.startfile(self.root/'models')))
         self.session=QLineEdit(time.strftime('%Y-%m-%d')+'-home-01'); form.addRow('Сессия съёмки',self.session)
         self.source=QLineEdit('Собственная съёмка'); form.addRow('Источник / права',self.source)
         self.epochs=QSpinBox(); self.epochs.setRange(1,100); self.epochs.setValue(10); form.addRow('Эпохи',self.epochs)
@@ -460,6 +467,10 @@ class Window(QMainWindow):
         if index>=0: self.training_product.setCurrentIndex(index)
         summary=self.db.rows('SELECT p.name,COUNT(*) AS n,COUNT(DISTINCT l.session) AS sessions FROM labels l JOIN products p ON p.barcode=l.barcode GROUP BY l.barcode ORDER BY p.name')
         self.photo_summary.setText('Примеры: '+('; '.join(f"{r['name']}: {r['n']} фото, съёмок {r['sessions']}" for r in summary) or 'пока нет фотографий'))
+        from .train import training_guidance
+        self.training_hint.setText(training_guidance(self.db.rows('SELECT * FROM labels')) or 'Данные собраны. Перед запуском будут проверены разделение съёмок и дубликаты.')
+        count=len(list((self.root/'models').glob('*.pt')))
+        self.models_note.setText(f'Папка моделей: {self.root / "models"}\nСохранено моделей: {count}. Файл .pt появляется только после успешного обучения; импорт фото сохраняет примеры, а не модель.')
 
     def save_label(self):
         code=self.barcode.text().strip()
@@ -480,15 +491,24 @@ class Window(QMainWindow):
 
     def train(self):
         if self.training and self.training.state()!=QProcess.NotRunning: raise ValueError('Обучение уже запущено')
-        from .train import split_sessions
-        split_sessions(self.db.rows('SELECT * FROM labels'))
+        from .train import split_sessions, training_guidance
+        rows=self.db.rows('SELECT * FROM labels')
+        guidance=training_guidance(rows)
+        if guidance:
+            self.train_log.append(guidance)
+            raise ValueError(guidance)
+        split_sessions(rows)
         self.training=QProcess(self); self.training.setProcessChannelMode(QProcess.MergedChannels)
         environment=QProcessEnvironment.systemEnvironment(); environment.insert('PYTHONIOENCODING','utf-8')
         self.training.setProcessEnvironment(environment)
         self.training.readyReadStandardOutput.connect(lambda:self.train_log.append(bytes(self.training.readAllStandardOutput()).decode('utf-8',errors='replace')))
         self.training.errorOccurred.connect(lambda e:self.train_log.append('Ошибка запуска: '+self.training.errorString()))
-        self.training.finished.connect(lambda code:self.train_log.append(f'Обучение завершено, код {code}. Для применения выберите модель и проверьте метрики.'))
+        self.training.finished.connect(self.training_finished)
         self.training.start(self.train_python.text(),['-u','-m','pikkabpe.train','--data',str(self.root),'--epochs',str(self.epochs.value())])
+
+    def training_finished(self,code):
+        self.train_log.append(f'Модель сохранена в {self.root / "models"}. Проверьте отчёт и активируйте модель.' if code==0 else f'Обучение не завершено (код {code}). Модель этого запуска не создана. Причина указана выше в журнале.')
+        self.refresh()
 
     def stop_training(self):
         if self.training: self.training.terminate()
