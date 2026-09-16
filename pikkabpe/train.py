@@ -122,17 +122,17 @@ class Predictor:
         index=int(prob.argmax()); return self.classes[index],float(prob[index])
 
 
-def serve(model):
+def serve(model=None, warehouse=None, decode=False):
     import sys, base64, io
     from contextlib import redirect_stdout
     from PIL import Image
-    metadata=Path(model).with_suffix('.json')
-    report=json.loads(metadata.read_text(encoding='utf-8')) if metadata.exists() else {}
-    yolo=report.get('engine')=='yolo'
+    metadata=Path(model).with_suffix('.json') if model else None
+    report=json.loads(metadata.read_text(encoding='utf-8')) if metadata and metadata.exists() else {}
+    yolo=report.get('engine') in ('yolo','warehouse_onnx') or bool(warehouse) or decode
     with redirect_stdout(sys.stderr):
         if yolo:
-            from .yolo_backend import YoloPredictor
-            predictor=YoloPredictor(model)
+            from .vision import VisionPipeline
+            predictor=VisionPipeline(model,warehouse,decode)
         else: predictor=Predictor(model)
     print(json.dumps({'ready':True,'device':predictor.device,'engine':'yolo' if yolo else 'classifier'}),flush=True)
     for line in sys.stdin:
@@ -143,7 +143,7 @@ def serve(model):
                 with redirect_stdout(sys.stderr):
                     if yolo: detections=predictor.predict_image(image,request.get('confidence',.35))
                     else: code,score=predictor.predict_image(image)
-            result={'id':request['id'],'detections':detections} if yolo else {'id':request['id'],'barcode':code,'score':score}
+            result={'id':request['id'],**detections} if yolo else {'id':request['id'],'barcode':code,'score':score}
         except Exception as exc:
             result={'id':request.get('id'),'error':str(exc)}
         print(json.dumps(result,ensure_ascii=False),flush=True)
@@ -153,12 +153,14 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--data'); parser.add_argument('--epochs',type=int,default=10)
     parser.add_argument('--predict'); parser.add_argument('--model')
     parser.add_argument('--serve',action='store_true')
+    parser.add_argument('--warehouse-model')
+    parser.add_argument('--decode-barcodes',action='store_true')
     parser.add_argument('--catalog-pilot',action='store_true',help='Explicit unvalidated catalog experiment; never used by normal UI training')
     parser.add_argument('--yolo',action='store_true'); parser.add_argument('--weights',default='yolov8n.pt')
     args=parser.parse_args()
     if args.serve:
-        if not args.model: parser.error('--model is required')
-        serve(args.model)
+        if not (args.model or args.warehouse_model or args.decode_barcodes): parser.error('Select a model or barcode decoding')
+        serve(args.model,args.warehouse_model,args.decode_barcodes)
     elif args.predict:
         if not args.model: parser.error('--model is required for prediction')
         code,score=Predictor(args.model).predict(args.predict); print(f'{code}: {score:.1%}')
