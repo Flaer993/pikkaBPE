@@ -157,7 +157,7 @@ class Window(QMainWindow):
         brand = QLabel('pikkāBPE   /   VISION CONTROL'); brand.setObjectName('brand'); layout.addWidget(brand)
         sub = QLabel('ОДНА ЗОНА   •   ОБУЧЕНИЕ С ОПЕРАТОРОМ   •   ЛОКАЛЬНЫЙ УЧЁТ'); sub.setObjectName('subtitle'); layout.addWidget(sub)
         self.tabs = QTabWidget(); layout.addWidget(self.tabs)
-        self.build_camera(); self.build_inventory(); self.build_training(); self.build_updates()
+        self.build_camera(); self.build_inventory(); self.build_training(); self.build_updates(); self.build_catalogs()
         self.status = QLabel(f'Данные: {self.root}'); layout.addWidget(self.status)
         self.refresh()
         self.timer = QTimer(self); self.timer.timeout.connect(self.send_target); self.timer.start(100)
@@ -212,6 +212,7 @@ class Window(QMainWindow):
         buttons=QHBoxLayout(); box.addLayout(buttons)
         for title, fn in [('Подтвердить',lambda:self.review(True)),('Отклонить',lambda:self.review(False)),('Кадр',self.show_evidence),('Поступление',self.add_receipt),('Сотрудник',lambda:self.add_catalog('employees')),('Новое место',lambda:self.add_catalog('locations')),('Экспорт CSV',self.export),('Резервная копия',self.backup),('Обновить',self.refresh)]: buttons.addWidget(self.button(title,fn))
         self.events=QTableWidget(); self.events.setSelectionBehavior(QTableWidget.SelectRows); box.addWidget(self.events,3)
+        box.addWidget(self.button('Удалить выбранное событие',self.delete_event))
         box.addWidget(QLabel('ПОДТВЕРЖДЁННЫЕ ОСТАТКИ / ОЖИДАЕМЫЕ ПОСТУПЛЕНИЯ'))
         lower=QHBoxLayout(); box.addLayout(lower,2)
         self.stock=QTableWidget(); lower.addWidget(self.stock)
@@ -219,8 +220,13 @@ class Window(QMainWindow):
 
     def build_training(self):
         page=QWidget(); self.tabs.addTab(page,'Обучение'); box=QVBoxLayout(page)
-        note=QLabel('Выделите предмет рамкой на вкладке «Наблюдение». Укажите его штрихкод.\nДля обучения нужны разные сессии съёмки: проверочные сессии не попадают в обучение.\nМодель классифицирует выделенный предмет; сотрудника и складскую операцию подтверждает оператор.'); note.setWordWrap(True); box.addWidget(note)
+        note=QLabel('1. Выберите товар. 2. Добавьте фотографии этого предмета. 3. Нажмите «Обучить на NVIDIA».\nНа каждой фотографии должен быть один выбранный предмет крупным планом. Для обрезки используйте «Открыть фото для выделения».\nДля проверки нужны минимум два товара, каждый в двух независимых съёмках. Сотрудника и операцию подтверждает оператор.'); note.setWordWrap(True); box.addWidget(note)
         form=QFormLayout(); box.addLayout(form)
+        self.training_product=QComboBox(); form.addRow('Товар на фотографиях',self.training_product)
+        photos=QHBoxLayout(); box.addLayout(photos)
+        photos.addWidget(self.button('Добавить фотографии товара',self.add_photos,True))
+        photos.addWidget(self.button('Новая съёмка',lambda:self.session.setText(time.strftime('%Y-%m-%d-%H%M%S'))))
+        self.photo_summary=QLabel(''); self.photo_summary.setWordWrap(True); box.addWidget(self.photo_summary)
         self.session=QLineEdit(time.strftime('%Y-%m-%d')+'-home-01'); form.addRow('Сессия съёмки',self.session)
         self.source=QLineEdit('Собственная съёмка'); form.addRow('Источник / права',self.source)
         self.epochs=QSpinBox(); self.epochs.setRange(1,100); self.epochs.setValue(10); form.addRow('Эпохи',self.epochs)
@@ -228,12 +234,75 @@ class Window(QMainWindow):
         self.train_python=QLineEdit(str(Path(sys.executable)) if not getattr(sys,'frozen',False) else (str(local_python) if local_python.exists() else '')); form.addRow('Python окружения обучения',self.train_python)
         row=QHBoxLayout(); box.addLayout(row)
         row.addWidget(self.button('Сохранить выделенный пример',self.save_label,True))
-        row.addWidget(self.button('Импортировать изображение',self.import_image))
+        row.addWidget(self.button('Открыть фото для выделения',self.import_image))
         row.addWidget(self.button('Обучить на NVIDIA',self.train))
+        row=QHBoxLayout(); box.addLayout(row)
         row.addWidget(self.button('Остановить обучение',self.stop_training))
         row.addWidget(self.button('Активировать модель',self.promote))
         row.addWidget(self.button('Распознать выделенный предмет',self.predict))
         self.train_log=QTextEdit(); self.train_log.setReadOnly(True); box.addWidget(self.train_log)
+
+    def build_catalogs(self):
+        page=QWidget(); self.tabs.addTab(page,'Сотрудники и товары'); box=QVBoxLayout(page)
+        box.addWidget(QLabel('СОТРУДНИКИ — добавьте имя или выберите строку для изменения'))
+        row=QHBoxLayout(); box.addLayout(row)
+        self.employee_name=QLineEdit(); self.employee_name.setPlaceholderText('ФИО сотрудника'); row.addWidget(self.employee_name)
+        row.addWidget(self.button('Добавить сотрудника',self.add_employee,True))
+        row.addWidget(self.button('Сохранить имя выбранного',self.rename_employee))
+        self.employees_table=QTableWidget(); self.employees_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.employees_table.itemSelectionChanged.connect(self.select_employee); box.addWidget(self.employees_table)
+        box.addWidget(QLabel('ТОВАРЫ — для нового предмета без кода штрихкод создаётся автоматически'))
+        row=QHBoxLayout(); box.addLayout(row)
+        self.new_product_name=QLineEdit(); self.new_product_name.setPlaceholderText('Название нового предмета'); row.addWidget(self.new_product_name)
+        self.new_product_code=QLineEdit(); self.new_product_code.setPlaceholderText('Существующий штрихкод (необязательно)'); row.addWidget(self.new_product_code)
+        row.addWidget(self.button('Добавить товар и штрихкод',self.add_product,True))
+        row.addWidget(self.button('Открыть штрихкод выбранного',self.open_barcode))
+        self.products_table=QTableWidget(); self.products_table.setSelectionBehavior(QTableWidget.SelectRows); box.addWidget(self.products_table)
+
+    def add_employee(self):
+        key='EMP-'+uuid.uuid4().hex[:12]
+        self.db.catalog('employees',key,self.employee_name.text())
+        self.employee_name.clear(); self.refresh()
+        self.employee.setCurrentIndex(self.employee.findData(key))
+
+    def select_employee(self):
+        row=self.employees_table.currentRow()
+        if row>=0 and self.employees_table.item(row,1): self.employee_name.setText(self.employees_table.item(row,1).text())
+
+    def rename_employee(self):
+        row=self.employees_table.currentRow()
+        if row<0: raise ValueError('Выберите сотрудника в таблице')
+        self.db.catalog('employees',self.employees_table.item(row,0).text(),self.employee_name.text()); self.refresh()
+
+    def add_product(self):
+        from .labels import new_code, barcode_label
+        name=self.new_product_name.text().strip()
+        if not name: raise ValueError('Введите название предмета')
+        code=self.new_product_code.text().strip() or new_code()
+        if self.db.rows('SELECT 1 FROM products WHERE barcode=?',(code,)): raise ValueError('Товар с таким кодом уже существует')
+        path=barcode_label(self.root,code)
+        self.db.catalog('products',code,name)
+        self.barcode.setText(code); self.product_name.setText(name)
+        self.new_product_name.clear(); self.new_product_code.clear(); self.refresh()
+        self.training_product.setCurrentIndex(self.training_product.findData(code))
+        self.status.setText(f'Товар добавлен. Штрихкод для печати: {path}')
+
+    def open_barcode(self):
+        from .labels import barcode_label
+        row=self.products_table.currentRow()
+        if row<0: raise ValueError('Выберите товар в таблице')
+        os.startfile(barcode_label(self.root,self.products_table.item(row,0).text()))
+
+    def add_photos(self):
+        from .labels import import_photos
+        code=self.training_product.currentData()
+        if not code: raise ValueError('Добавьте и выберите товар')
+        paths,_=QFileDialog.getOpenFileNames(self,'Выберите фотографии одного товара','','Изображения (*.jpg *.jpeg *.png *.bmp *.webp)')
+        if not paths: return
+        added,errors=import_photos(self.db,self.root,paths,code,self.session.text(),self.source.text())
+        self.train_log.append(f'Добавлено фотографий: {added}. Товар: {self.training_product.currentText()}')
+        for error in errors: self.train_log.append(error)
+        self.refresh()
 
     def build_updates(self):
         page=QWidget(); self.tabs.addTab(page,'Система'); box=QVBoxLayout(page)
@@ -295,6 +364,12 @@ class Window(QMainWindow):
             name,ok=QInputDialog.getText(self,'Новый товар',f'Название для {code}:')
             if not ok: return
             self.db.catalog('products',code,name); rows=[{'name':name}]
+            from .labels import barcode_label
+            try:
+                path=barcode_label(self.root,code); self.status.setText(f'Штрихкод создан: {path}')
+            except ValueError as exc:
+                self.status.setText(f'Товар сохранён. {exc}')
+            self.refresh()
         self.product_name.setText(rows[0]['name'])
 
     def add_catalog(self,table):
@@ -337,6 +412,12 @@ class Window(QMainWindow):
         if row<0: raise ValueError('Выберите событие')
         self.db.review(self.events.item(row,0).text(),self.operator.text(),accept); self.refresh()
 
+    def delete_event(self):
+        row=self.events.currentRow()
+        if row<0: raise ValueError('Выберите событие')
+        if QMessageBox.question(self,'Удаление события','Удалить событие? Его влияние на остаток и поступление будет отменено. Запись об удалении останется в журнале.')!=QMessageBox.Yes: return
+        self.db.delete_event(self.events.item(row,0).text(),self.operator.text()); self.refresh()
+
     def show_evidence(self):
         row=self.events.currentRow()
         if row<0: raise ValueError('Выберите событие')
@@ -354,7 +435,7 @@ class Window(QMainWindow):
         table.resizeColumnsToContents()
 
     def refresh(self):
-        self.fill(self.events,self.db.rows('SELECT e.*,p.name FROM events e JOIN products p ON p.barcode=e.barcode ORDER BY created DESC LIMIT 500'), [('id','ID'),('created','UTC'),('kind','Операция'),('name','Товар'),('quantity','Кол-во'),('location','Место'),('employee','Сотрудник'),('status','Статус')])
+        self.fill(self.events,self.db.rows('SELECT e.*,p.name,emp.name AS employee_name FROM events e JOIN products p ON p.barcode=e.barcode LEFT JOIN employees emp ON emp.id=e.employee WHERE e.deleted IS NULL ORDER BY e.created DESC LIMIT 500'), [('id','ID'),('created','UTC'),('kind','Операция'),('name','Товар'),('quantity','Кол-во'),('location','Место'),('employee_name','Сотрудник'),('status','Статус')])
         self.events.setColumnHidden(0,True)
         self.fill(self.stock,self.db.rows('SELECT s.*,p.name FROM stock s JOIN products p ON p.barcode=s.barcode'), [('barcode','Код'),('name','Товар'),('location','Место'),('quantity','Остаток')])
         receipts=self.db.rows('SELECT r.*,p.name FROM receipts r JOIN products p ON p.barcode=r.barcode ORDER BY created DESC')
@@ -368,16 +449,30 @@ class Window(QMainWindow):
         self.receipt_combo.clear(); self.receipt_combo.addItem('Выберите поступление',None)
         for r in receipts:
             if r['placed']<r['quantity']: self.receipt_combo.addItem(f"{r['name']} / осталось {r['quantity']-r['placed']}",r['id'])
+        self.employees_table.blockSignals(True)
+        self.fill(self.employees_table,self.db.rows('SELECT * FROM employees ORDER BY name'),[('id','Код'),('name','Имя')])
+        self.employees_table.blockSignals(False)
+        products=self.db.rows('SELECT * FROM products ORDER BY name')
+        self.fill(self.products_table,products,[('barcode','Штрихкод'),('name','Товар')])
+        old=self.training_product.currentData(); self.training_product.clear()
+        for p in products: self.training_product.addItem(f"{p['name']} / {p['barcode']}",p['barcode'])
+        index=self.training_product.findData(old)
+        if index>=0: self.training_product.setCurrentIndex(index)
+        summary=self.db.rows('SELECT p.name,COUNT(*) AS n,COUNT(DISTINCT l.session) AS sessions FROM labels l JOIN products p ON p.barcode=l.barcode GROUP BY l.barcode ORDER BY p.name')
+        self.photo_summary.setText('Примеры: '+('; '.join(f"{r['name']}: {r['n']} фото, съёмок {r['sessions']}" for r in summary) or 'пока нет фотографий'))
 
     def save_label(self):
         code=self.barcode.text().strip()
         if not self.db.rows('SELECT 1 FROM products WHERE barcode=?',(code,)): raise ValueError('Сначала добавьте товар')
         path=self.evidence(crop=True); self.db.label(path,code,self.session.text(),self.source.text())
         self.train_log.append(f'Пример сохранён: {code}; {self.session.text()}')
+        self.refresh()
 
     def import_image(self):
         path,_=QFileDialog.getOpenFileName(self,'Изображение из разрешённого набора','','Изображения (*.jpg *.png *.jpeg)')
         if path:
+            if self.training_product.currentData():
+                self.barcode.setText(self.training_product.currentData()); self.lookup()
             import numpy as np
             frame=cv2.imdecode(np.fromfile(path,dtype=np.uint8),cv2.IMREAD_COLOR)
             if frame is None: raise ValueError('Изображение не прочитано')
@@ -385,6 +480,8 @@ class Window(QMainWindow):
 
     def train(self):
         if self.training and self.training.state()!=QProcess.NotRunning: raise ValueError('Обучение уже запущено')
+        from .train import split_sessions
+        split_sessions(self.db.rows('SELECT * FROM labels'))
         self.training=QProcess(self); self.training.setProcessChannelMode(QProcess.MergedChannels)
         environment=QProcessEnvironment.systemEnvironment(); environment.insert('PYTHONIOENCODING','utf-8')
         self.training.setProcessEnvironment(environment)

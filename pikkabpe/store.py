@@ -30,6 +30,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, created TEXT NOT NULL, action TEXT NOT NULL, payload TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS labels(id TEXT PRIMARY KEY, image TEXT NOT NULL, barcode TEXT NOT NULL REFERENCES products(barcode), session TEXT NOT NULL, source TEXT NOT NULL, created TEXT NOT NULL);
             ''')
+            if 'deleted' not in {r['name'] for r in db.execute('PRAGMA table_info(events)')}:
+                db.execute('ALTER TABLE events ADD COLUMN deleted TEXT')
             for i in range(1, 8):
                 db.execute('INSERT OR IGNORE INTO locations VALUES(?,?)', (f'R{i}', f'Стеллаж {i}'))
 
@@ -90,7 +92,7 @@ class Store:
             row = db.execute('SELECT * FROM events WHERE id=?', (eid,)).fetchone()
             if not row:
                 raise ValueError('Событие не найдено')
-            if row['status'] != 'pending':
+            if row['deleted'] or row['status'] != 'pending':
                 raise ValueError('Событие уже рассмотрено')
             if accept:
                 old = db.execute('SELECT quantity FROM stock WHERE barcode=? AND location=?', (row['barcode'], row['location'])).fetchone()
@@ -106,6 +108,25 @@ class Store:
             db.execute('UPDATE events SET status=?,operator=?,confirmed=? WHERE id=?', ('confirmed' if accept else 'rejected', operator, now(), eid))
             self.audit(db, 'event_reviewed', {'id': eid, 'operator': operator, 'accepted': accept})
 
+    def delete_event(self, eid, operator):
+        if not operator.strip():
+            raise ValueError('Укажите оператора на вкладке «Наблюдение»')
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT * FROM events WHERE id=?', (eid,)).fetchone()
+            if not row or row['deleted']:
+                raise ValueError('Событие не найдено или уже удалено')
+            if row['status'] == 'confirmed':
+                old = db.execute('SELECT quantity FROM stock WHERE barcode=? AND location=?', (row['barcode'], row['location'])).fetchone()
+                quantity = (old[0] if old else 0) + (row['quantity'] if row['kind'] == 'take' else -row['quantity'])
+                if quantity < 0:
+                    raise ValueError('Удаление создаст отрицательный остаток. Сначала отмените связанные последующие взятия.')
+                db.execute('INSERT INTO stock VALUES(?,?,?) ON CONFLICT(barcode,location) DO UPDATE SET quantity=excluded.quantity', (row['barcode'], row['location'], quantity))
+                if row['receipt']:
+                    db.execute('UPDATE receipts SET placed=placed-? WHERE id=?', (row['quantity'], row['receipt']))
+            db.execute('UPDATE events SET deleted=? WHERE id=?', (now(), eid))
+            self.audit(db, 'event_deleted', {'event': dict(row), 'operator': operator.strip()})
+
     def label(self, image, barcode, session, source):
         if not session.strip() or not source.strip():
             raise ValueError('Укажите сессию съёмки и источник')
@@ -114,7 +135,7 @@ class Store:
             self.audit(db, 'label_added', {'image': str(image), 'barcode': barcode, 'session': session})
 
     def export(self, path):
-        rows = self.rows("SELECT * FROM events WHERE status='confirmed' ORDER BY created")
+        rows = self.rows("SELECT * FROM events WHERE status='confirmed' AND deleted IS NULL ORDER BY created")
         fields = ['id','created','kind','barcode','quantity','location','employee','receipt','operator','confirmed']
         with open(path, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.DictWriter(f, fields, extrasaction='ignore')

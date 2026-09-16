@@ -22,7 +22,7 @@ styles.add(ParagraphStyle(name='TitleRU',fontName='UI-Bold',fontSize=34,leading=
 def footer(c,doc):
     c.setStrokeColor(HexColor('#f5822b')); c.line(42,40,553,40)
     c.setFont('UI',8); c.setFillColor(HexColor('#64717c'))
-    c.drawString(42,26,'pikkāBPE / 0.1.1 / P0 / домашний прототип')
+    c.drawString(42,26,'pikkāBPE / 0.1.2 / P0 / домашний прототип')
     c.drawRightString(553,26,str(doc.page))
 
 story=[Spacer(1,35),Paragraph('pikkāBPE',styles['TitleRU']),Paragraph('Камера. Подвес. Операторский учёт.',styles['HeadingRU']),Paragraph('Минимальная документация / 16 сентября 2026',styles['BodyRU'])]
