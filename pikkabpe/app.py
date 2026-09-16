@@ -196,7 +196,7 @@ class Window(QMainWindow):
         self.quantity=QSpinBox(); self.quantity.setRange(1,100000); form.addRow('Количество, шт',self.quantity)
         self.receipt_combo=QComboBox(); form.addRow('Поступление',self.receipt_combo)
         panel.addWidget(self.button('В очередь подтверждения',self.propose,True))
-        panel.addWidget(QLabel('ПОДВЕС / USB–UART'))
+        panel.addWidget(QLabel('ПОДВЕС / USB CDC · COM'))
         self.com=QLineEdit(); self.com.setPlaceholderText('COM3'); panel.addWidget(self.com)
         panel.addWidget(self.button('Подключить контроллер',lambda:self.link.open(self.com.text())))
         self.pan=QDoubleSpinBox(); self.pan.setRange(-60,60); self.pan.setSuffix('°'); form2=QFormLayout(); panel.addLayout(form2); form2.addRow('Поворот',self.pan)

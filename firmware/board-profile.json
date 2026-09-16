@@ -1,15 +1,24 @@
 {
   "board": "PB_MCU01_H503A",
   "mcu_family": "STM32H503",
-  "usb_uart": "onboard, user confirmed; net routing not yet verified",
+  "mcu": "STM32H503CBT6",
+  "schematic_revision": "V1.0",
+  "usb_uart": "No bridge on supplied schematic. Native USB CDC on PA11/PA12.",
+  "firmware_buildable": true,
+  "hardware_tested": false,
   "flash_ready": false,
   "uart_instance": null,
   "uart_tx_pin": null,
   "uart_rx_pin": null,
-  "pan_pwm_pin": null,
-  "tilt_pwm_pin": null,
+  "flash_ready_note": "Bench candidate BIN/HEX available. Hardware validation pending; do not deploy overhead.",
+  "pan_pwm_pin": "PA0 / TIM2_CH1 / AF1 / H1 pin 5",
+  "tilt_pwm_pin": "PA1 / TIM2_CH2 / AF1 / H1 pin 6",
+  "ground": "H1 pin 19 or 20",
+  "usb_dm_pin": "PA11 / H2 pin 13",
+  "usb_dp_pin": "PA12 / H2 pin 12",
+  "swd": {"ground":"H3-1","clock":"H3-2 PA14","data":"H3-3 PA13","vref":"H3-4 3.3V","reset":"H1-17 NRST"},
   "servo_supply_design_v": 6.0,
   "servo_supply_design_a": 5.0,
   "supply_note": "Initial engineering budget; measure simultaneous startup/stall current. Not an MCU pin rating.",
-  "reason": "No authoritative board schematic found. Do not invent pin mapping. Need schematic or vendor pinout."
+  "reason": "Schematic 12731066989.pdf and manual 12731067148.pdf supplied by user; direct USB, not USB-UART. No hardware was flashed."
 }

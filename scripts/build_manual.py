@@ -22,13 +22,13 @@ styles.add(ParagraphStyle(name='TitleRU',fontName='UI-Bold',fontSize=34,leading=
 def footer(c,doc):
     c.setStrokeColor(HexColor('#f5822b')); c.line(42,40,553,40)
     c.setFont('UI',8); c.setFillColor(HexColor('#64717c'))
-    c.drawString(42,26,'pikkāBPE / 0.1.0 / P0 / домашний прототип')
+    c.drawString(42,26,'pikkāBPE / 0.1.1 / P0 / домашний прототип')
     c.drawRightString(553,26,str(doc.page))
 
 story=[Spacer(1,35),Paragraph('pikkāBPE',styles['TitleRU']),Paragraph('Камера. Подвес. Операторский учёт.',styles['HeadingRU']),Paragraph('Минимальная документация / 16 сентября 2026',styles['BodyRU'])]
 preview=ROOT/'cad'/'previews'/'assembly.png'
 if preview.exists(): story.append(Image(str(preview),width=490,height=350))
-story.append(Paragraph('Этап 1: домашний стенд. CAD P0 - компоновка для проверки посадок. Автономный складской учёт и готовая прошивка платы в этот выпуск не входят.',styles['BodyRU']))
+story.append(Paragraph('Этап 1: домашний стенд. CAD P0 - компоновка для проверки посадок. Складской учёт подтверждает оператор. Прошивка USB CDC собрана, проверка на плате впереди.',styles['BodyRU']))
 story.append(PageBreak())
 text=(ROOT/'docs'/'manual.md').read_text(encoding='utf-8')
 for section in text.split('\n## ')[1:]:

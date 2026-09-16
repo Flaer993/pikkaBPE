@@ -35,9 +35,23 @@ jobs:
           path: |
             dist/pikkaBPE-windows-x64.zip
             dist/SHA256SUMS.txt
+  firmware-board:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Arm compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi
+      - run: python3 scripts/fetch_firmware_deps.py
+      - run: python3 scripts/build_firmware.py
+      - name: Package board firmware
+        run: tar -czf pikkaBPE-PB-H503-USB.tar.gz -C build/pb_h503 pikkaBPE-PB-H503-USB.bin pikkaBPE-PB-H503-USB.hex pikkaBPE-PB-H503-USB.elf build-report.json SHA256SUMS.txt licenses
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pb-h503-firmware
+          path: pikkaBPE-PB-H503-USB.tar.gz
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, firmware-core]
+    needs: [windows, firmware-core, firmware-board]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -46,6 +60,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: windows-client
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: pb-h503-firmware
           path: release
       - name: Release validated artifacts
         env:
